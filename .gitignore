@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Build outputs
+build/
+dist/
+*.spec
+
+# PyInstaller
+*.manifest
+*.toc
+
+# App outputs
+*.exe
+
+# Local/temp folders
+trash/
+3.0error/
+temp/
+tmp/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Excel temp files
+~$*.xls
+~$*.xlsx
