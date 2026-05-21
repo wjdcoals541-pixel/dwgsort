@@ -519,8 +519,24 @@ class MainWindow(QMainWindow):
                 f"bbox={row['BBox']}, "
                 f"rotation={row['Rotation']}"
             )
-        self.pdf_label_rows = analyze_pdf_label_rows(items, self.append_log)
-        self.pdf_profile_match_df = match_pdf_profile_rows(self.pdf_label_rows, self.append_log)
+        self.append_log(
+            "[PDF] PDF 설정: "
+            f"y_tolerance={self.pdf_region_config.get('pdf_y_tolerance', 5.0)}, "
+            f"x_tolerance={self.pdf_region_config.get('pdf_x_tolerance', 10.0)}, "
+            f"row_cluster_tolerance={self.pdf_region_config.get('row_cluster_tolerance', 1.5)}"
+        )
+        self.pdf_label_rows = analyze_pdf_label_rows(
+            items,
+            self.append_log,
+            pdf_y_tolerance=self.pdf_region_config.get("pdf_y_tolerance", 5.0),
+            pdf_x_tolerance=self.pdf_region_config.get("pdf_x_tolerance", 10.0),
+            row_cluster_tolerance=self.pdf_region_config.get("row_cluster_tolerance", 1.5),
+        )
+        self.pdf_profile_match_df = match_pdf_profile_rows(
+            self.pdf_label_rows,
+            self.append_log,
+            pdf_x_tolerance=self.pdf_region_config.get("pdf_x_tolerance", 10.0),
+        )
         if self.pdf_profile_match_df.empty:
             self.last_filtered_df = None
             self.last_saved_path = None
@@ -712,8 +728,14 @@ class MainWindow(QMainWindow):
         ax = self.preview_figure.add_subplot(111)
         self.preview_figure.patch.set_facecolor("#172233")
         ax.set_facecolor("#101a29")
-        ax.plot(plot_df["x"], plot_df["y"], marker="o", linewidth=1.8, markersize=4, color="#38bdf8")
-        ax.fill_between(plot_df["x"], plot_df["y"], plot_df["y"].min(), color="#256fe6", alpha=0.12)
+        if "line_id" in df.columns:
+            plot_df["line_id"] = df.loc[plot_df.index, "line_id"].values
+            for _line_id, group in plot_df.groupby("line_id", sort=False):
+                ax.plot(group["x"], group["y"], marker="o", linewidth=1.8, markersize=4, color="#38bdf8")
+                ax.fill_between(group["x"], group["y"], group["y"].min(), color="#256fe6", alpha=0.10)
+        else:
+            ax.plot(plot_df["x"], plot_df["y"], marker="o", linewidth=1.8, markersize=4, color="#38bdf8")
+            ax.fill_between(plot_df["x"], plot_df["y"], plot_df["y"].min(), color="#256fe6", alpha=0.12)
         ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.28, color="#9fb0c8")
         ax.tick_params(colors="#cfe0f8", labelsize=8)
         ax.set_xlabel("누가거리", color="#cfe0f8", fontsize=9, fontproperties=KOREAN_FONT)
@@ -828,6 +850,7 @@ class MainWindow(QMainWindow):
 
     def _populate_table(self, df):
         pdf_columns = [
+            "line_id",
             "페이지",
             "누가거리",
             "관저고",
@@ -919,7 +942,7 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".xlsx"):
             path += ".xlsx"
         safe_path = safe_output_path(path)
-        add_result_column(self.last_filtered_df).to_excel(safe_path, index=False, engine="openpyxl")
+        self._default_result_save_df(self.last_filtered_df).to_excel(safe_path, index=False, engine="openpyxl")
         self.last_saved_path = safe_path
         self.show_message("Excel 저장 완료", safe_path)
 
@@ -930,8 +953,12 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "CSV 저장", "결과.csv", "CSV files (*.csv)")
         if not path:
             return
-        add_result_column(self.last_filtered_df).to_csv(path, index=False, encoding="utf-8-sig")
+        self._default_result_save_df(self.last_filtered_df).to_csv(path, index=False, encoding="utf-8-sig")
         self.show_message("CSV 저장 완료", path)
+
+    def _default_result_save_df(self, df):
+        result_df = add_result_column(df)
+        return result_df[["관저고", "누가거리", "결과"]].copy()
 
     def reset(self):
         self.selected_files = []
