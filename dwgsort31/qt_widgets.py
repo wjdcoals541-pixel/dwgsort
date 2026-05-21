@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -26,8 +27,10 @@ class Card(QFrame):
         self.setObjectName("Card")
         self.title_label = None
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(18, 18, 18, 18)
-        self.layout.setSpacing(12)
+        self.layout.setContentsMargins(14, 12, 14, 12)
+        self.layout.setSpacing(8)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumWidth(0)
 
         if title:
             self.title_label = QLabel(title)
@@ -44,8 +47,8 @@ class MetricCard(QFrame):
         super().__init__(parent)
         self.setObjectName("Card")
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(14, 8, 14, 8)
-        self.layout.setSpacing(8)
+        self.layout.setContentsMargins(12, 8, 12, 8)
+        self.layout.setSpacing(6)
 
         self.title_label = QLabel(title)
         self.title_label.setObjectName("Muted")
@@ -62,9 +65,9 @@ class MetricCard(QFrame):
         if compact:
             self.layout.setContentsMargins(10, 6, 10, 6)
             self.title_label.setStyleSheet("font-size: 11px;")
-            self.value_label.setStyleSheet("font-size: 18px; font-weight: 800;")
+            self.value_label.setStyleSheet("font-size: 16px; font-weight: 700;")
         else:
-            self.layout.setContentsMargins(14, 8, 14, 8)
+            self.layout.setContentsMargins(12, 8, 12, 8)
             self.title_label.setStyleSheet("")
             self.value_label.setStyleSheet("")
 
@@ -81,17 +84,17 @@ class DropZone(QFrame):
 
         layout = QHBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(10)
 
         title = QLabel("PDF/Excel 드래그 앤 드롭")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 15px; font-weight: 750;")
+        title.setStyleSheet("font-size: 14px; font-weight: 700;")
         title.setMinimumWidth(0)
 
         self.choose_button = make_button("선택", primary=True)
-        self.choose_button.setFixedHeight(30)
-        self.choose_button.setFixedWidth(52)
+        self.choose_button.setFixedHeight(28)
+        self.choose_button.setFixedWidth(50)
         self.choose_button.clicked.connect(self.chooseClicked.emit)
 
         layout.addWidget(title, 1)

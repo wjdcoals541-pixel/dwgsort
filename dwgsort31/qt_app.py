@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizeGrip,
     QSizePolicy,
     QSpinBox,
@@ -36,13 +37,16 @@ from matplotlib.font_manager import FontProperties
 
 from .config import (
     DEFAULT_MAX_DISTANCE,
+    DEFAULT_PEAK_PROMINENCE,
     DEFAULT_SLOPE_CHANGE,
     DEFAULT_TOLERANCE,
     SAVE_MODE_COMPAT_24,
+    SAVE_MODE_COMPAT_33,
     SAVE_MODE_EXTENDED_31,
     SUPPORTED_EXTENSIONS,
 )
 from .excel_compat import add_result_column, filter_graph_points_24, process_excel_data
+from .excel_compat33 import filter_graph_points_33
 from .qt_styles import apply_fluent_theme
 from .qt_widgets import Card, DropZone, MetricCard, make_button
 from .qt_workers import AnalysisWorker
@@ -59,7 +63,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        self.setWindowTitle("CAD PDF Converter Pro - DWG Sort 3.1")
+        self.setWindowTitle("CAD PDF Converter Pro - DWG Sort 3.3")
         self.resize(1280, 820)
         self.setMinimumSize(600, 500)
         self.selected_files = []
@@ -98,53 +102,80 @@ class MainWindow(QMainWindow):
         page = QWidget()
         self.main_layout = QVBoxLayout(page)
         layout = self.main_layout
-        layout.setContentsMargins(22, 16, 22, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 12, 16, 8)
+        layout.setSpacing(0)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setChildrenCollapsible(False)
-        self.splitter.setHandleWidth(8)
+        self.splitter.setHandleWidth(6)
 
+        # Left panel with scroll
         left_page = QWidget()
         self.left_layout = QVBoxLayout(left_page)
         self.left_layout.setContentsMargins(0, 0, 0, 0)
-        self.left_layout.setSpacing(12)
+        self.left_layout.setSpacing(10)
         self.left_layout.addWidget(self._build_file_card(), 0)
-        self.left_layout.addWidget(self._build_graph_preview_card(), 10)
-        self.left_layout.addWidget(self._build_run_card(), 0)
-        self.left_layout.addWidget(self._build_log_card(), 0)
+        self.left_layout.addWidget(self._build_graph_preview_card(), 2)
+        self.left_layout.addStretch(0)
 
+        left_scroll = QScrollArea()
+        left_scroll.setWidget(left_page)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { width: 8px; margin: 0; background: transparent; }
+            QScrollBar::handle:vertical { background: #888; border-radius: 4px; min-height: 20px; }
+            QScrollBar::handle:vertical:hover { background: #aaa; }
+        """)
+
+        # Right panel with scroll
         right_page = QWidget()
         self.right_layout = QVBoxLayout(right_page)
         self.right_layout.setContentsMargins(0, 0, 0, 0)
-        self.right_layout.setSpacing(12)
-        self.right_layout.addWidget(self._build_result_card(), 10)
+        self.right_layout.setSpacing(10)
+        self.right_layout.addWidget(self._build_result_card(), 2)
         self.right_layout.addWidget(self._build_settings_card(), 0)
+        self.right_layout.addWidget(self._build_run_card(), 0)
+        self.right_layout.addWidget(self._build_log_card(), 1)
         self.right_layout.addWidget(self._build_progress_card(), 0)
+        self.right_layout.addStretch(0)
 
-        self.splitter.addWidget(left_page)
-        self.splitter.addWidget(right_page)
+        right_scroll = QScrollArea()
+        right_scroll.setWidget(right_page)
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { width: 8px; margin: 0; background: transparent; }
+            QScrollBar::handle:vertical { background: #888; border-radius: 4px; min-height: 20px; }
+            QScrollBar::handle:vertical:hover { background: #aaa; }
+        """)
+
+        self.splitter.addWidget(left_scroll)
+        self.splitter.addWidget(right_scroll)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([1, 1])
         layout.addWidget(self.splitter, 1)
+        
+        self.left_scroll = left_scroll
+        self.right_scroll = right_scroll
         return page
 
     def _build_file_card(self):
-        card = Card("1. PDF/Excel 파일 선택")
+        card = Card("파일 선택")
         self.file_card = card
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.drop_zone = DropZone()
-        self.drop_zone.setMinimumHeight(52)
+        self.drop_zone.setMinimumHeight(40)
         self.drop_zone.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.drop_zone.filesDropped.connect(self.add_files)
         self.drop_zone.chooseClicked.connect(self.choose_files)
-        card.layout.addWidget(self.drop_zone)
+        card.layout.addWidget(self.drop_zone, 0)
 
         self.file_list = QListWidget()
-        self.file_list.setMinimumHeight(40)
+        self.file_list.setMinimumHeight(30)
         self.file_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.file_list.currentItemChanged.connect(lambda _current, _previous: self.update_inline_preview())
-        card.layout.addWidget(self.file_list)
+        card.layout.addWidget(self.file_list, 1)
 
         file_actions = QHBoxLayout()
         self.add_file_button = make_button("파일 추가")
@@ -156,20 +187,20 @@ class MainWindow(QMainWindow):
         file_actions.addWidget(self.add_file_button)
         file_actions.addWidget(self.remove_file_button)
         file_actions.addWidget(self.clear_file_button)
-        card.layout.addLayout(file_actions)
+        card.layout.addLayout(file_actions, 0)
         return card
 
     def _build_settings_card(self):
-        card = Card("2. 변환 설정")
+        card = Card("변환 설정")
         self.settings_card = card
-        self.settings_card.setMinimumHeight(70)
         grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
+        grid.setHorizontalSpacing(4)
         grid.setVerticalSpacing(6)
 
         self.save_combo = QComboBox()
-        self.save_combo.addItems(["2.4", "3.1"])
-        self.save_combo.setCurrentText("2.4")
+        self.save_combo.addItems(["2.4", "3.1", "3.3"])
+        self.save_combo.setCurrentText("3.3")
+        self.save_combo.currentTextChanged.connect(self.update_inline_preview)
 
         self.tolerance_spin = QDoubleSpinBox()
         self.tolerance_spin.setRange(0.1, 1000.0)
@@ -189,6 +220,12 @@ class MainWindow(QMainWindow):
         self.max_dist_spin.setValue(DEFAULT_MAX_DISTANCE)
         self.max_dist_spin.valueChanged.connect(self.update_inline_preview)
 
+        self.peak_prominence_spin = QDoubleSpinBox()
+        self.peak_prominence_spin.setRange(0.0, 10.0)
+        self.peak_prominence_spin.setSingleStep(0.05)
+        self.peak_prominence_spin.setValue(DEFAULT_PEAK_PROMINENCE)
+        self.peak_prominence_spin.valueChanged.connect(self.update_inline_preview)
+
         self.pdf_start_spin = QSpinBox()
         self.pdf_start_spin.setRange(1, 100000)
         self.pdf_start_spin.setValue(1)
@@ -201,32 +238,54 @@ class MainWindow(QMainWindow):
             self.tolerance_spin,
             self.slope_spin,
             self.max_dist_spin,
+            self.peak_prominence_spin,
             self.pdf_start_spin,
             self.pdf_end_spin,
         ]:
-            control.setFixedHeight(34)
+            control.setFixedHeight(28)
             control.setMinimumWidth(0)
             control.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
-        fields = [
+        # Row 1: 저장, Y오차, 기울기
+        fields_row1 = [
             ("저장", self.save_combo),
             ("Y오차", self.tolerance_spin),
             ("기울기", self.slope_spin),
-            ("거리", self.max_dist_spin),
-            ("PDF", self._pair_widget(self.pdf_start_spin, self.pdf_end_spin)),
         ]
-        for idx, (label, widget) in enumerate(fields):
+        for idx, (label, widget) in enumerate(fields_row1):
             box = QHBoxLayout()
             box.setContentsMargins(0, 0, 0, 0)
-            box.setSpacing(6)
+            box.setSpacing(2)
             caption = QLabel(label)
             caption.setObjectName("Muted")
-            caption.setFixedWidth(36)
+            caption.setFixedWidth(38)
+            caption.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             box.addWidget(caption)
             box.addWidget(widget, 1)
             widget.setMinimumWidth(0)
             widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             grid.addLayout(box, 0, idx)
+            grid.setColumnStretch(idx, 1)
+
+        # Row 2: 거리, 고점, PDF
+        fields_row2 = [
+            ("거리", self.max_dist_spin),
+            ("고점", self.peak_prominence_spin),
+            ("PDF", self._pair_widget(self.pdf_start_spin, self.pdf_end_spin)),
+        ]
+        for idx, (label, widget) in enumerate(fields_row2):
+            box = QHBoxLayout()
+            box.setContentsMargins(0, 0, 0, 0)
+            box.setSpacing(2)
+            caption = QLabel(label)
+            caption.setObjectName("Muted")
+            caption.setFixedWidth(38)
+            caption.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            box.addWidget(caption)
+            box.addWidget(widget, 1)
+            widget.setMinimumWidth(0)
+            widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            grid.addLayout(box, 1, idx)
             grid.setColumnStretch(idx, 1)
 
         card.layout.addLayout(grid)
@@ -235,25 +294,25 @@ class MainWindow(QMainWindow):
     def _build_graph_preview_card(self):
         card = Card("📊 그래프 미리보기")
         self.graph_preview_card = card
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         self.preview_message = QLabel("미리보기 대기 중")
         self.preview_message.setObjectName("Muted")
         self.preview_message.setWordWrap(True)
-        card.layout.addWidget(self.preview_message)
+        card.layout.addWidget(self.preview_message, 0)
 
         self.preview_figure = Figure(figsize=(6, 2.7), dpi=100)
         self.preview_canvas = FigureCanvas(self.preview_figure)
-        self.preview_canvas.setMinimumHeight(120)
+        self.preview_canvas.setMinimumHeight(80)
         self.preview_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        card.layout.addWidget(self.preview_canvas, 10)
+        card.layout.addWidget(self.preview_canvas, 1)
         self.clear_preview_plot()
         
         return card
 
     def _build_run_card(self):
-        card = Card("3. 빠른 실행")
+        card = Card("빠른 실행")
         self.run_card = card
-        self.run_card.setMinimumHeight(70)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
@@ -267,48 +326,40 @@ class MainWindow(QMainWindow):
         self.excel_button.clicked.connect(self.export_excel)
         self.csv_button.clicked.connect(self.export_csv)
         self.graph_button.clicked.connect(self.preview_graph)
-        row.addStretch(1)
         for button in [self.run_button, self.reset_button, self.excel_button, self.csv_button, self.graph_button]:
-            button.setFixedHeight(36)
-            button.setMinimumWidth(74)
-            row.addWidget(button, 0)
+            button.setFixedHeight(34)
+            button.setMinimumWidth(60)
+        row.addWidget(self.run_button)
+        row.addWidget(self.reset_button)
+        row.addWidget(self.excel_button)
+        row.addWidget(self.csv_button)
+        row.addWidget(self.graph_button)
         row.addStretch(1)
         card.layout.addLayout(row)
         return card
 
     def _build_result_card(self):
-        card = Card()
+        card = Card("변환 결과 미리보기")
         self.result_card = card
-
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(8)
-        self.result_title_label = QLabel("변환 결과 미리보기")
-        self.result_title_label.setObjectName("SectionTitle")
-        header.addWidget(self.result_title_label)
-        header.addStretch(1)
-        self.copy_profile_button = make_button("복사")
-        self.copy_profile_button.setFixedSize(44, 24)
-        self.copy_profile_button.clicked.connect(self.copy_profile_columns)
-        header.addWidget(self.copy_profile_button)
-        card.layout.addLayout(header)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.result_title_label = card.title_label
 
         stats = QGridLayout()
-        stats.setHorizontalSpacing(8)
+        stats.setHorizontalSpacing(6)
         stats.setVerticalSpacing(0)
         self.metric_lines = MetricCard("총 라인 수")
         self.metric_pages = MetricCard("총 페이지 수")
         self.metric_quantity = MetricCard("총 수량")
         for metric in [self.metric_lines, self.metric_pages, self.metric_quantity]:
-            metric.setMaximumHeight(64)
+            metric.setMaximumHeight(60)
         stats.addWidget(self.metric_lines, 0, 0)
         stats.addWidget(self.metric_quantity, 0, 1)
         stats.addWidget(self.metric_pages, 0, 2)
-        card.layout.addLayout(stats)
+        card.layout.addLayout(stats, 0)
 
         self.table = QTableWidget(0, 3)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.table.setMinimumHeight(90)
+        self.table.setMinimumHeight(60)
         self.table.setSelectionMode(QTableWidget.ExtendedSelection)
         self.table.setSelectionBehavior(QTableWidget.SelectItems)
         self.table.setHorizontalHeaderLabels(["관저고", "누가거리", "결과"])
@@ -318,26 +369,34 @@ class MainWindow(QMainWindow):
         )
         copy_shortcut = QShortcut(QKeySequence.Copy, self.table)
         copy_shortcut.activated.connect(self.copy_table_selection)
-        card.layout.addWidget(self.table, 1)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+        header.addWidget(self.table, 1)
+        self.copy_profile_button = make_button("복사")
+        self.copy_profile_button.setFixedSize(44, 24)
+        self.copy_profile_button.clicked.connect(self.copy_profile_columns)
+        header.addWidget(self.copy_profile_button)
+        card.layout.addLayout(header, 1)
         return card
 
     def _build_log_card(self):
         card = Card("실행 로그")
         self.log_card = card
-        self.log_card.setMaximumHeight(150)
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
-        self.log_box.setMinimumHeight(54)
+        self.log_box.setMinimumHeight(40)
         self.log_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        card.layout.addWidget(self.log_box)
+        card.layout.addWidget(self.log_box, 1)
         return card
 
     def _build_progress_card(self):
         card = Card("진행 상황")
         self.progress_card = card
-        self.progress_card.setMaximumHeight(150)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
+        self.progress_bar.setFixedHeight(24)
         self.percent_label = QLabel("0%")
         self.eta_label = QLabel("예상 남은 시간: -")
         self.eta_label.setObjectName("Muted")
@@ -391,11 +450,12 @@ class MainWindow(QMainWindow):
                 self.set_status("미리보기 실패")
                 return
 
-            filtered_df = filter_graph_points_24(
+            filtered_df = self.current_filter_func()(
                 df_result,
                 self.append_log,
                 self.slope_spin.value(),
                 self.max_dist_spin.value(),
+                peak_prominence=self.peak_prominence_spin.value(),
             )
             from .plotting import preview_profile
 
@@ -435,11 +495,12 @@ class MainWindow(QMainWindow):
                 self.clear_inline_result()
                 return
 
-            filtered_df = filter_graph_points_24(
+            filtered_df = self.current_filter_func()(
                 df_result,
                 lambda _message: None,
                 self.slope_spin.value(),
                 self.max_dist_spin.value(),
+                peak_prominence=self.peak_prominence_spin.value(),
             )
             self.last_filtered_df = filtered_df
             self.last_saved_path = None
@@ -577,6 +638,7 @@ class MainWindow(QMainWindow):
             "tolerance": self.tolerance_spin.value(),
             "slope": self.slope_spin.value(),
             "max_dist": self.max_dist_spin.value(),
+            "peak_prominence": self.peak_prominence_spin.value(),
             "pdf_start": self.pdf_start_spin.value(),
             "pdf_end": self.pdf_end_spin.value() or None,
         }
@@ -723,7 +785,15 @@ class MainWindow(QMainWindow):
         self.status.showMessage(text)
 
     def current_save_mode(self):
-        return SAVE_MODE_EXTENDED_31 if self.save_combo.currentText() == "3.1" else SAVE_MODE_COMPAT_24
+        text = self.save_combo.currentText()
+        if text == "3.3":
+            return SAVE_MODE_COMPAT_33
+        if text == "3.1":
+            return SAVE_MODE_EXTENDED_31
+        return SAVE_MODE_COMPAT_24
+
+    def current_filter_func(self):
+        return filter_graph_points_33 if self.current_save_mode() == SAVE_MODE_COMPAT_33 else filter_graph_points_24
 
     def _set_working(self, working):
         self.run_button.setDisabled(working or not self.selected_files)
@@ -744,7 +814,7 @@ class MainWindow(QMainWindow):
     def _show_guide(self):
         self.show_message(
             "사용 가이드",
-            "파일 선택 → 변환 설정 → 변환 시작 순서로 사용하세요. 기본 저장 방식은 2.4 호환 저장입니다.",
+            "파일 선택 → 변환 설정 → 변환 시작 순서로 사용하세요. 기본 저장 방식은 3.3 호환 저장입니다.",
         )
 
     def changeEvent(self, event):
@@ -759,98 +829,65 @@ class MainWindow(QMainWindow):
     def apply_responsive_layout(self):
         if not hasattr(self, "main_layout"):
             return
-        compact = self.width() < 1000 or self.height() < 600
-        title_visible = self.width() >= 1120 and self.height() >= 680
-        action_title_visible = title_visible and self.width() >= 1500 and self.height() >= 780
-        metric_lines_visible = self.width() >= 1180 and self.height() >= 700
-        metric_pages_visible = self.width() >= 1240 and self.height() >= 730
-        metric_quantity_visible = self.width() >= 1320 and self.height() >= 760
-        state = (
-            compact,
-            title_visible,
-            action_title_visible,
-            self.preview_has_plot,
-            metric_lines_visible,
-            metric_pages_visible,
-            metric_quantity_visible,
-        )
-        if state == self._compact_mode:
-            return
-        self._compact_mode = state
-
-        for card in [
-            self.file_card,
-            self.log_card,
-            self.progress_card,
-        ]:
-            card.set_title_visible(title_visible)
-        self.result_title_label.setVisible(title_visible)
-        self.graph_preview_card.set_title_visible(title_visible and not self.preview_has_plot)
-        self.run_card.set_title_visible(action_title_visible)
-        self.settings_card.set_title_visible(action_title_visible)
-
-        self.metric_lines.setVisible(metric_lines_visible)
-        self.metric_pages.setVisible(metric_pages_visible)
-        self.metric_quantity.setVisible(metric_quantity_visible)
-        metric_compact = self.width() < 1450 or self.height() < 820
-        for metric in [self.metric_lines, self.metric_pages, self.metric_quantity]:
-            metric.set_compact(metric_compact)
-
-        if compact:
-            self.main_layout.setContentsMargins(10, 8, 10, 6)
-            self.main_layout.setSpacing(6)
+        
+        w, h = self.width(), self.height()
+        is_narrow = w < 900
+        is_compact = h < 600
+        
+        # 좁은 화면(< 900px)일 때는 수직 스플리터로 변경
+        if is_narrow:
+            if self.splitter.orientation() != Qt.Vertical:
+                self.splitter.setOrientation(Qt.Vertical)
+                self.splitter.setSizes([1, 1])
+        else:
+            if self.splitter.orientation() != Qt.Horizontal:
+                self.splitter.setOrientation(Qt.Horizontal)
+                self.splitter.setSizes([1, 1])
+        
+        # 마진 및 간격 조정
+        if is_compact:
+            self.main_layout.setContentsMargins(8, 6, 8, 4)
+            self.main_layout.setSpacing(0)
             self.left_layout.setSpacing(6)
             self.right_layout.setSpacing(6)
-            self.splitter.setHandleWidth(6)
-            for card in [
-                self.file_card,
-                self.graph_preview_card,
-                self.run_card,
-                self.log_card,
-                self.result_card,
-                self.settings_card,
-                self.progress_card,
-            ]:
-                card.setMinimumWidth(0)
-                card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-                card.layout.setContentsMargins(10, 10, 10, 10)
-                card.layout.setSpacing(6)
-            self.drop_zone.setMinimumHeight(40)
-            self.file_list.setMinimumHeight(32)
-            self.preview_canvas.setMinimumHeight(72)
-            self.table.setMinimumHeight(70)
-            self.log_box.setMinimumHeight(48)
-            self.preview_message.setVisible(self.preview_has_plot or self.height() >= 520)
+            self.splitter.setHandleWidth(4)
+            card_margins = (10, 8, 10, 8)
+            card_spacing = 6
         else:
-            self.main_layout.setContentsMargins(22, 16, 22, 12)
-            self.main_layout.setSpacing(12)
-            self.left_layout.setSpacing(12)
-            self.right_layout.setSpacing(12)
-            self.splitter.setHandleWidth(8)
-            for card in [
-                self.file_card,
-                self.graph_preview_card,
-                self.run_card,
-                self.log_card,
-                self.result_card,
-                self.settings_card,
-                self.progress_card,
-            ]:
-                card.setMinimumWidth(0)
-                card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-                card.layout.setContentsMargins(18, 18, 18, 18)
-                card.layout.setSpacing(12)
-            self.drop_zone.setMinimumHeight(52)
-            self.file_list.setMinimumHeight(40)
-            self.preview_canvas.setMinimumHeight(120)
-            self.table.setMinimumHeight(90)
-            self.log_box.setMinimumHeight(54)
-            self.preview_message.setVisible(True)
-
-        if not action_title_visible:
-            for card in [self.run_card, self.settings_card]:
-                card.layout.setContentsMargins(10, 8, 10, 8)
-                card.layout.setSpacing(6)
+            self.main_layout.setContentsMargins(16, 12, 16, 8)
+            self.main_layout.setSpacing(0)
+            self.left_layout.setSpacing(10)
+            self.right_layout.setSpacing(10)
+            self.splitter.setHandleWidth(6)
+            card_margins = (14, 12, 14, 12)
+            card_spacing = 8
+        
+        # 모든 카드에 동일한 마진 및 간격 적용
+        for card in [
+            self.file_card,
+            self.graph_preview_card,
+            self.settings_card,
+            self.run_card,
+            self.log_card,
+            self.result_card,
+            self.progress_card,
+        ]:
+            card.layout.setContentsMargins(*card_margins)
+            card.layout.setSpacing(card_spacing)
+        
+        # 화면 크기에 따른 최소 높이 조정
+        if is_compact:
+            self.drop_zone.setMinimumHeight(30)
+            self.file_list.setMinimumHeight(24)
+            self.preview_canvas.setMinimumHeight(50)
+            self.table.setMinimumHeight(40)
+            self.log_box.setMinimumHeight(30)
+        else:
+            self.drop_zone.setMinimumHeight(40)
+            self.file_list.setMinimumHeight(30)
+            self.preview_canvas.setMinimumHeight(80)
+            self.table.setMinimumHeight(60)
+            self.log_box.setMinimumHeight(40)
 
 
 class TitleBar(QFrame):
@@ -865,7 +902,7 @@ class TitleBar(QFrame):
         layout.setContentsMargins(12, 4, 8, 4)
         layout.setSpacing(8)
 
-        title = QLabel("▣  CAD PDF Converter Pro - DWG Sort 3.1")
+        title = QLabel("▣  CAD PDF Converter Pro - DWG Sort 3.3")
         title.setStyleSheet("font-size: 12px; font-weight: 700; background: transparent;")
         layout.addWidget(title, 1)
 

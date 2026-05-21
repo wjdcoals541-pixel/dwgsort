@@ -136,55 +136,155 @@ def filter_graph_points_24(
     peak_prominence=0.30,
     peak_window=2,
 ):
-    """2.4-compatible point compression."""
+    """2.4-compatible point compression.
+
+    Preservation priority:
+    1. first/last point
+    2. slope-change points, calculated from original neighboring points
+    3. local peaks/valleys using only peak_prominence
+    4. low-priority spacing points when important points are farther than max_dist
+    """
     df = df.copy()
     df["누가거리_num"] = pd.to_numeric(
-        df["누가거리"].astype(str).str.replace(",", "", regex=False), errors="coerce"
+        df["누가거리"].astype(str).str.replace(",", "", regex=False),
+        errors="coerce",
     )
     df["관저고_num"] = pd.to_numeric(
-        df["관저고"].astype(str).str.replace(",", "", regex=False), errors="coerce"
+        df["관저고"].astype(str).str.replace(",", "", regex=False),
+        errors="coerce",
     )
-    df = df.dropna(subset=["누가거리_num", "관저고_num"]).reset_index(drop=True)
+    df = (
+        df.dropna(subset=["누가거리_num", "관저고_num"])
+        .sort_values("누가거리_num")
+        .drop_duplicates(subset=["누가거리_num"], keep="first")
+        .reset_index(drop=True)
+    )
 
     if len(df) <= 2:
         return df.drop(columns=["누가거리_num", "관저고_num"], errors="ignore").copy()
 
-    kept_indices = [0]
-    last_kept_idx = 0
+    n = len(df)
+    x = df["누가거리_num"].tolist()
+    y = df["관저고_num"].tolist()
 
-    for i in range(1, len(df) - 1):
-        x_prev = df.loc[last_kept_idx, "누가거리_num"]
-        y_prev = df.loc[last_kept_idx, "관저고_num"]
-        x_curr = df.loc[i, "누가거리_num"]
-        y_curr = df.loc[i, "관저고_num"]
-        x_next = df.loc[i + 1, "누가거리_num"]
-        y_next = df.loc[i + 1, "관저고_num"]
+    max_dist = max(float(max_dist or 0), 0.0)
+    slope_threshold = float(slope_threshold or 0)
+    peak_prominence = max(float(peak_prominence or 0), 0.0)
+    peak_window = max(int(peak_window or 1), 1)
 
-        dx_in = x_curr - x_prev
-        dy_in = y_curr - y_prev
-        dx_out = x_next - x_curr
-        dy_out = y_next - y_curr
+    kept_indices = {0, n - 1}
+    reasons = {
+        0: {"endpoint"},
+        n - 1: {"endpoint"},
+    }
+    slope_count = 0
+    peak_count = 0
+    valley_count = 0
+    spacing_count = 0
 
-        if dx_in > max_dist:
-            kept_indices.append(i)
-            last_kept_idx = i
-            continue
+    def add_keep(idx, reason):
+        kept_indices.add(idx)
+        reasons.setdefault(idx, set()).add(reason)
+
+    def same_height(a, b):
+        return abs(a - b) <= 1e-9
+
+    # 1) Shape-critical points: slope changes and local peaks/valleys.
+    for i in range(1, n - 1):
+        dx_in = x[i] - x[i - 1]
+        dx_out = x[i + 1] - x[i]
 
         if dx_in == 0 or dx_out == 0:
-            kept_indices.append(i)
-            last_kept_idx = i
+            slope_change = float("inf")
+        else:
+            slope_in = (y[i] - y[i - 1]) / dx_in
+            slope_out = (y[i + 1] - y[i]) / dx_out
+            slope_change = abs(slope_in - slope_out)
+
+        if slope_change > slope_threshold:
+            add_keep(i, "slope")
+            slope_count += 1
+
+        # Do not keep every point in a flat top/bottom plateau.  The first point
+        # of the plateau is enough; subsequent equal-height points are skipped
+        # unless they were already kept as slope-change points.
+        if same_height(y[i], y[i - 1]):
             continue
 
-        slope_change = abs((dy_in / dx_in) - (dy_out / dx_out))
-        if slope_change > slope_threshold:
-            kept_indices.append(i)
-            last_kept_idx = i
+        lo = max(0, i - peak_window)
+        hi = min(n, i + peak_window + 1)
+        left_values = y[lo:i]
+        right_values = y[i + 1 : hi]
+        if not left_values or not right_values:
+            continue
 
-    if kept_indices[-1] != len(df) - 1:
-        kept_indices.append(len(df) - 1)
+        left_min = min(left_values)
+        right_min = min(right_values)
+        left_max = max(left_values)
+        right_max = max(right_values)
 
-    log_func(f" ✂️ 데이터 압축(변곡점): {len(df)}개 -> {len(kept_indices)}개")
-    return df.iloc[kept_indices].drop(columns=["누가거리_num", "관저고_num"]).copy()
+        peak_strength = min(y[i] - left_min, y[i] - right_min)
+        valley_strength = min(left_max - y[i], right_max - y[i])
+
+        is_peak = (
+            y[i] >= left_max
+            and y[i] >= right_max
+            and peak_strength >= peak_prominence
+        )
+        is_valley = (
+            y[i] <= left_min
+            and y[i] <= right_min
+            and valley_strength >= peak_prominence
+        )
+
+        if is_peak:
+            add_keep(i, "peak")
+            peak_count += 1
+        elif is_valley:
+            add_keep(i, "valley")
+            valley_count += 1
+
+    # 2) Low-priority spacing points.  These are added only after all critical
+    # points are fixed, so they never replace slope/peak/valley points.
+    if max_dist > 0:
+        while True:
+            ordered = sorted(kept_indices)
+            added = False
+
+            for left_idx, right_idx in zip(ordered, ordered[1:]):
+                gap = x[right_idx] - x[left_idx]
+                if gap <= max_dist:
+                    continue
+
+                inner = [
+                    idx
+                    for idx in range(left_idx + 1, right_idx)
+                    if idx not in kept_indices
+                ]
+                if not inner:
+                    continue
+
+                target_x = x[left_idx] + max_dist
+                best_idx = min(inner, key=lambda idx: abs(x[idx] - target_x))
+                add_keep(best_idx, "spacing")
+                spacing_count += 1
+                added = True
+                break
+
+            if not added:
+                break
+
+    kept_indices = sorted(kept_indices)
+
+    log_func(
+        f" ✂️ 데이터 압축: {len(df)}개 -> {len(kept_indices)}개 "
+        f"(기울기 {slope_count}개, 고점 {peak_count}개, 저점 {valley_count}개, "
+        f"보조거리 {spacing_count}개, peak_prominence {peak_prominence}m)"
+    )
+
+    return df.iloc[kept_indices].drop(
+        columns=["누가거리_num", "관저고_num"], errors="ignore"
+    ).copy()
 
 
 def add_result_column(df):
