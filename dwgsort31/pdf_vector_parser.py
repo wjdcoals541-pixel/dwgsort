@@ -7,10 +7,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from .config import (
-    PDF_REGION_PAD_BOTTOM,
-    PDF_REGION_PAD_LEFT,
-    PDF_REGION_PAD_RIGHT,
-    PDF_REGION_PAD_TOP,
+    PDF_REGION_PAD_RATIO,
     PDF_ROW_CLUSTER_TOLERANCE,
     PDF_X_TOLERANCE,
     PDF_Y_TOLERANCE,
@@ -160,11 +157,15 @@ def extract_pdf_page_region_text(file_path, page_number, region, log_func=None):
 
 def expand_pdf_region(region, page_width, page_height):
     x0, y0, x1, y1 = _normalize_region(region)
+    width = max(1.0, x1 - x0)
+    height = max(1.0, y1 - y0)
+    pad_x = width * PDF_REGION_PAD_RATIO
+    pad_y = height * PDF_REGION_PAD_RATIO
     return (
-        max(0.0, x0 - PDF_REGION_PAD_LEFT),
-        max(0.0, y0 - PDF_REGION_PAD_TOP),
-        min(float(page_width), x1 + PDF_REGION_PAD_RIGHT),
-        min(float(page_height), y1 + PDF_REGION_PAD_BOTTOM),
+        max(0.0, x0 - pad_x),
+        max(0.0, y0 - pad_y),
+        min(float(page_width), x1 + pad_x),
+        min(float(page_height), y1 + pad_y),
     )
 
 

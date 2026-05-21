@@ -61,6 +61,7 @@ class PdfPreviewCanvas(QWidget):
         self.setMinimumSize(720, 520)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setFocusPolicy(Qt.StrongFocus)
+        self.setMouseTracking(True)
         self._pixmap = QPixmap()
         self._page_size = (1.0, 1.0)
         self._selection = None
@@ -555,6 +556,15 @@ class PdfRegionDialog(QDialog):
         self.inspect_label.setWordWrap(True)
         self.inspect_label.setObjectName("Muted")
         layout.addWidget(self.inspect_label)
+
+        self.legend_label = QLabel(
+            "표시 설명: 파란 실선=직접 선택한 영역 / 하늘색 점선=실제 추출 영역(자동 확장 포함) / "
+            "노란 띠=누가거리 행 / 초록 띠=관저고 행 / 회색 띠=제외된 후보 행 / "
+            "옅은 파란 띠=라벨 기준 PDF Y오차 범위. 실제 추출 영역은 선택 영역의 약 15%만큼 확장됩니다."
+        )
+        self.legend_label.setWordWrap(True)
+        self.legend_label.setObjectName("Muted")
+        layout.addWidget(self.legend_label)
 
         controls = QHBoxLayout()
         self.prev_button = QPushButton("이전 페이지")
