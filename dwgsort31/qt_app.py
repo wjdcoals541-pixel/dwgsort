@@ -6,8 +6,10 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, Qt, QThread
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -47,9 +49,12 @@ from .config import (
 )
 from .excel_compat import add_result_column, filter_graph_points_24, process_excel_data
 from .excel_compat33 import filter_graph_points_33
+from .pdf_region_dialog import PdfRegionDialog
+from .pdf_vector_parser import analyze_pdf_label_rows, extract_pdf_region_text, match_pdf_profile_rows
 from .qt_styles import apply_fluent_theme
 from .qt_widgets import Card, DropZone, MetricCard, make_button
 from .qt_workers import AnalysisWorker
+from .utils import safe_output_path
 
 
 KOREAN_FONT = None
@@ -71,6 +76,11 @@ class MainWindow(QMainWindow):
         self.thread = None
         self.last_filtered_df = None
         self.last_saved_path = None
+        self.pdf_region_config = None
+        self.pdf_region_text_df = None
+        self.pdf_region_text_items = []
+        self.pdf_label_rows = {}
+        self.pdf_profile_match_df = None
         self.preview_has_plot = False
         self._compact_mode = None
 
@@ -169,6 +179,7 @@ class MainWindow(QMainWindow):
         self.drop_zone.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.drop_zone.filesDropped.connect(self.add_files)
         self.drop_zone.chooseClicked.connect(self.choose_files)
+        self.drop_zone.pdfRegionClicked.connect(self.open_pdf_region_dialog)
         card.layout.addWidget(self.drop_zone, 0)
 
         self.file_list = QListWidget()
@@ -362,6 +373,7 @@ class MainWindow(QMainWindow):
         self.table.setMinimumHeight(60)
         self.table.setSelectionMode(QTableWidget.ExtendedSelection)
         self.table.setSelectionBehavior(QTableWidget.SelectItems)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setHorizontalHeaderLabels(["관저고", "누가거리", "결과"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setStyleSheet(
@@ -384,6 +396,15 @@ class MainWindow(QMainWindow):
     def _build_log_card(self):
         card = Card("실행 로그")
         self.log_card = card
+        log_actions = QHBoxLayout()
+        log_actions.setContentsMargins(0, 0, 0, 0)
+        log_actions.addStretch(1)
+        self.copy_log_button = make_button("로그 복사")
+        self.copy_log_button.setFixedHeight(24)
+        self.copy_log_button.clicked.connect(self.copy_log_to_clipboard)
+        log_actions.addWidget(self.copy_log_button)
+        card.layout.addLayout(log_actions, 0)
+
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setMinimumHeight(40)
@@ -431,12 +452,124 @@ class MainWindow(QMainWindow):
         )
         self.add_files(files)
 
+    def open_pdf_region_dialog(self):
+        file_path = self._current_pdf_file()
+        if not file_path:
+            self.show_message("PDF 필요", "PDF 영역을 지정할 PDF 파일을 먼저 선택하세요.", error=True)
+            return
+
+        try:
+            dialog = PdfRegionDialog(
+                file_path,
+                self.pdf_start_spin.value(),
+                self.pdf_end_spin.value() or None,
+                self,
+            )
+        except Exception as exc:
+            self.show_message("PDF 미리보기 오류", str(exc), error=True)
+            return
+
+        if dialog.exec() == QDialog.Accepted and dialog.result is not None:
+            self.pdf_region_config = dialog.result.to_settings()
+            self.pdf_region_config["file"] = file_path
+            region = self.pdf_region_config.get("default_region")
+            if region is None:
+                region = self.pdf_region_config["page_regions"].get(self.pdf_region_config["page_start"])
+            self.append_log(
+                "[PDF] 영역 지정 완료: "
+                f"{os.path.basename(file_path)}, "
+                f"페이지 {self.pdf_region_config['page_start']}~{self.pdf_region_config['page_end']}, "
+                f"x0={region[0]:.2f}, y0={region[1]:.2f}, x1={region[2]:.2f}, y1={region[3]:.2f}"
+            )
+            self.extract_selected_pdf_region_text(file_path)
+
+    def extract_selected_pdf_region_text(self, file_path):
+        if not self.pdf_region_config:
+            self.show_message("PDF 영역 필요", "먼저 PDF 영역을 지정하세요.", error=True)
+            return
+
+        try:
+            df, items = extract_pdf_region_text(file_path, self.pdf_region_config, self.append_log)
+        except Exception as exc:
+            self.pdf_region_text_df = None
+            self.pdf_region_text_items = []
+            self.append_log(f"[PDF][ERROR] 선택 영역 텍스트 추출 실패: {exc}")
+            self.show_message("PDF 텍스트 추출 오류", str(exc), error=True)
+            return
+
+        self.pdf_region_text_df = df
+        self.pdf_region_text_items = items
+        self.pdf_label_rows = {}
+        self.pdf_profile_match_df = None
+        if df.empty:
+            self.show_message(
+                "PDF 텍스트 없음",
+                "선택 영역에서 벡터 텍스트를 찾지 못했습니다.\n스캔 PDF이거나 영역이 잘못되었을 수 있습니다.",
+                error=True,
+            )
+            return
+
+        self.append_log("[PDF][DEBUG] Excel 유사 구조 미리보기:")
+        for _, row in df.head(30).iterrows():
+            self.append_log(
+                "[PDF][DEBUG] "
+                f"page={row['PDF페이지']}, "
+                f"Contents={row['Contents']}, "
+                f"Position={row['Position']}, "
+                f"bbox={row['BBox']}, "
+                f"rotation={row['Rotation']}"
+            )
+        self.pdf_label_rows = analyze_pdf_label_rows(items, self.append_log)
+        self.pdf_profile_match_df = match_pdf_profile_rows(self.pdf_label_rows, self.append_log)
+        if self.pdf_profile_match_df.empty:
+            self.last_filtered_df = None
+            self.last_saved_path = None
+            self.clear_inline_result()
+            self.show_message("PDF 결과 없음", "PDF 선택 영역에서 그래프로 표시할 매칭 결과를 만들지 못했습니다.", error=True)
+            return
+
+        self.last_filtered_df = self.pdf_profile_match_df
+        self.last_saved_path = None
+        self._populate_table(self.last_filtered_df)
+        self.draw_inline_preview(self.last_filtered_df)
+        self._update_summary(
+            {
+                "line_count": 1,
+                "page_count": self.pdf_region_config["page_end"] - self.pdf_region_config["page_start"] + 1,
+                "quantity_count": int(len(self.last_filtered_df)),
+            }
+        )
+        self.set_preview_message("PDF 추출 결과 미리보기")
+        self.set_status("PDF 추출 결과 준비 완료")
+        self._set_working(False)
+
+    def _current_pdf_file(self):
+        item = self.file_list.currentItem()
+        if item and item.text().lower().endswith(".pdf"):
+            return item.text()
+        return next((path for path in self.selected_files if path.lower().endswith(".pdf")), None)
+
     def preview_graph(self):
         if not self.selected_files:
             self.show_message("파일 필요", "먼저 Excel 파일을 선택하세요.", error=True)
             return
 
         file_path = self.file_list.currentItem().text() if self.file_list.currentItem() else self.selected_files[0]
+        if file_path.lower().endswith(".pdf"):
+            if self.last_filtered_df is None or self.last_filtered_df.empty:
+                self.show_message("PDF 결과 필요", "먼저 PDF 영역을 지정해 추출 결과를 만드세요.", error=True)
+                return
+            try:
+                from .plotting import preview_profile
+
+                preview_profile(self.last_filtered_df, f"종단면도 미리보기: {os.path.basename(file_path)}")
+                self.set_status("그래프 미리보기 완료")
+            except Exception as exc:
+                self.append_log(f"미리보기 오류: {exc}")
+                self.show_message("미리보기 오류", str(exc), error=True)
+                self.set_status("미리보기 오류")
+            return
+
         if not file_path.lower().endswith((".xls", ".xlsx")):
             self.show_message("미리보기 불가", "그래프 미리보기는 Excel 파일만 지원합니다.", error=True)
             return
@@ -620,6 +753,11 @@ class MainWindow(QMainWindow):
     def clear_files(self):
         count = len(self.selected_files)
         self.selected_files = []
+        self.pdf_region_config = None
+        self.pdf_region_text_df = None
+        self.pdf_region_text_items = []
+        self.pdf_label_rows = {}
+        self.pdf_profile_match_df = None
         self.file_list.clear()
         if count:
             self.append_log(f"파일 목록 전체 비움: {count}개")
@@ -689,8 +827,22 @@ class MainWindow(QMainWindow):
         )
 
     def _populate_table(self, df):
-        display_df = add_result_column(df).head(300)
-        columns = ["관저고", "누가거리", "결과"]
+        pdf_columns = [
+            "페이지",
+            "누가거리",
+            "관저고",
+            "누가거리 X",
+            "관저고 X",
+            "원본 누가거리",
+            "원본 관저고",
+            "상태",
+        ]
+        if all(column in df.columns for column in pdf_columns):
+            display_df = df[pdf_columns].head(300)
+            columns = pdf_columns
+        else:
+            display_df = add_result_column(df).head(300)
+            columns = ["관저고", "누가거리", "결과"]
         self.table.setRowCount(len(display_df))
         self.table.setColumnCount(len(columns))
         self.table.setHorizontalHeaderLabels(columns)
@@ -722,6 +874,14 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setText("\n".join(lines))
         self.set_status("선택한 표 데이터를 클립보드에 복사했습니다.")
 
+    def copy_log_to_clipboard(self):
+        text = self.log_box.toPlainText().strip()
+        if not text:
+            self.show_message("복사할 로그 없음", "실행 로그가 비어 있습니다.", error=True)
+            return
+        QApplication.clipboard().setText(text)
+        self.set_status("실행 로그를 클립보드에 복사했습니다.")
+
     def copy_profile_columns(self):
         if self.last_filtered_df is None or self.last_filtered_df.empty:
             self.show_message("복사할 데이터 없음", "먼저 변환 결과를 미리보거나 변환하세요.", error=True)
@@ -750,7 +910,18 @@ class MainWindow(QMainWindow):
         if self.last_saved_path and os.path.exists(self.last_saved_path):
             self.show_message("저장 완료", f"이미 저장된 파일:\n{self.last_saved_path}")
             return
-        self.show_message("저장할 데이터 없음", "변환 완료 후 사용할 수 있습니다.", error=True)
+        if self.last_filtered_df is None or self.last_filtered_df.empty:
+            self.show_message("저장할 데이터 없음", "변환 완료 후 사용할 수 있습니다.", error=True)
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Excel 저장", "결과.xlsx", "Excel files (*.xlsx)")
+        if not path:
+            return
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+        safe_path = safe_output_path(path)
+        add_result_column(self.last_filtered_df).to_excel(safe_path, index=False, engine="openpyxl")
+        self.last_saved_path = safe_path
+        self.show_message("Excel 저장 완료", safe_path)
 
     def export_csv(self):
         if self.last_filtered_df is None or self.last_filtered_df.empty:
@@ -764,6 +935,11 @@ class MainWindow(QMainWindow):
 
     def reset(self):
         self.selected_files = []
+        self.pdf_region_config = None
+        self.pdf_region_text_df = None
+        self.pdf_region_text_items = []
+        self.pdf_label_rows = {}
+        self.pdf_profile_match_df = None
         self.file_list.clear()
         self.log_box.clear()
         self.table.setRowCount(0)
@@ -796,12 +972,16 @@ class MainWindow(QMainWindow):
         return filter_graph_points_33 if self.current_save_mode() == SAVE_MODE_COMPAT_33 else filter_graph_points_24
 
     def _set_working(self, working):
+        has_pdf = any(f.lower().endswith(".pdf") for f in self.selected_files)
+        has_excel = any(f.lower().endswith((".xls", ".xlsx")) for f in self.selected_files)
+        has_result_data = self.last_filtered_df is not None
         self.run_button.setDisabled(working or not self.selected_files)
         self.reset_button.setDisabled(working)
-        self.excel_button.setDisabled(working or not self.last_saved_path)
+        self.excel_button.setDisabled(working or not (self.last_saved_path or has_result_data))
         self.csv_button.setDisabled(working or self.last_filtered_df is None)
-        self.graph_button.setDisabled(working or not any(f.lower().endswith((".xls", ".xlsx")) for f in self.selected_files))
+        self.graph_button.setDisabled(working or not (has_excel or has_result_data))
         self.add_file_button.setDisabled(working)
+        self.drop_zone.pdf_region_button.setDisabled(working or not has_pdf)
         self.remove_file_button.setDisabled(working or not self.selected_files)
         self.clear_file_button.setDisabled(working or not self.selected_files)
         if hasattr(self, "copy_profile_button"):

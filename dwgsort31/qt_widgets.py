@@ -75,6 +75,7 @@ class MetricCard(QFrame):
 class DropZone(QFrame):
     filesDropped = Signal(list)
     chooseClicked = Signal()
+    pdfRegionClicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -96,9 +97,13 @@ class DropZone(QFrame):
         self.choose_button.setFixedHeight(28)
         self.choose_button.setFixedWidth(50)
         self.choose_button.clicked.connect(self.chooseClicked.emit)
+        self.pdf_region_button = make_button("PDF 영역 지정")
+        self.pdf_region_button.setFixedHeight(28)
+        self.pdf_region_button.clicked.connect(self.pdfRegionClicked.emit)
 
         layout.addWidget(title, 1)
         layout.addWidget(self.choose_button, 0, Qt.AlignCenter)
+        layout.addWidget(self.pdf_region_button, 0, Qt.AlignCenter)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
