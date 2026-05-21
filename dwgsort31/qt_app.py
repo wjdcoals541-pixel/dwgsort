@@ -51,6 +51,7 @@ from .excel_compat import add_result_column, filter_graph_points_24, process_exc
 from .excel_compat33 import filter_graph_points_33
 from .pdf_region_dialog import PdfRegionDialog
 from .pdf_vector_parser import analyze_pdf_label_rows, extract_pdf_region_text, match_pdf_profile_rows
+from .pdf_point_filter import filter_pdf_graph_points
 from .qt_styles import apply_fluent_theme
 from .qt_widgets import Card, DropZone, MetricCard, make_button
 from .qt_workers import AnalysisWorker
@@ -544,7 +545,19 @@ class MainWindow(QMainWindow):
             self.show_message("PDF 결과 없음", "PDF 선택 영역에서 그래프로 표시할 매칭 결과를 만들지 못했습니다.", error=True)
             return
 
-        self.last_filtered_df = self.pdf_profile_match_df
+        self.last_filtered_df = filter_pdf_graph_points(
+            self.pdf_profile_match_df,
+            self.append_log,
+            self.slope_spin.value(),
+            self.max_dist_spin.value(),
+            self.peak_prominence_spin.value(),
+        )
+        if self.last_filtered_df.empty:
+            self.last_filtered_df = None
+            self.last_saved_path = None
+            self.clear_inline_result()
+            self.show_message("PDF 결과 없음", "PDF 선택 영역에서 점 정리 후 결과가 비어 있습니다.", error=True)
+            return
         self.last_saved_path = None
         self._populate_table(self.last_filtered_df)
         self.draw_inline_preview(self.last_filtered_df)
@@ -615,6 +628,56 @@ class MainWindow(QMainWindow):
             self.show_message("미리보기 오류", str(exc), error=True)
             self.set_status("미리보기 오류")
 
+    def refresh_pdf_filtered_preview(self):
+        if self.pdf_profile_match_df is None or self.pdf_profile_match_df.empty:
+            return False
+
+        filtered_df = filter_pdf_graph_points(
+            self.pdf_profile_match_df,
+            self.append_log,
+            self.slope_spin.value(),
+            self.max_dist_spin.value(),
+            self.peak_prominence_spin.value(),
+        )
+
+        if filtered_df.empty:
+            self.last_filtered_df = None
+            self.clear_inline_result()
+            self.set_preview_message("PDF 점 정리 결과가 비어 있습니다.")
+            return True
+
+        self.last_filtered_df = filtered_df
+        self.last_saved_path = None
+        self._populate_table(filtered_df)
+        self.draw_inline_preview(filtered_df)
+
+        line_count = 1
+        if "line_id" in filtered_df.columns:
+            line_count = int(filtered_df["line_id"].nunique())
+        elif "라인명" in filtered_df.columns:
+            line_count = int(filtered_df["라인명"].nunique())
+
+        page_count = 0
+        if "페이지" in filtered_df.columns:
+            page_count = int(filtered_df["페이지"].nunique())
+        elif "PDF페이지" in filtered_df.columns:
+            page_count = int(filtered_df["PDF페이지"].nunique())
+        elif self.pdf_region_config:
+            page_count = self.pdf_region_config["page_end"] - self.pdf_region_config["page_start"] + 1
+
+        self._update_summary(
+            {
+                "line_count": line_count,
+                "page_count": page_count,
+                "quantity_count": int(len(filtered_df)),
+            }
+        )
+        self.set_preview_message("PDF 변환 설정 반영 미리보기")
+        self.set_status("PDF 변환 설정 반영 완료")
+        self._set_working(False)
+        self.apply_responsive_layout()
+        return True
+
     def update_inline_preview(self):
         if not hasattr(self, "preview_canvas"):
             return
@@ -623,6 +686,14 @@ class MainWindow(QMainWindow):
         file_path = item.text() if item else (self.selected_files[0] if self.selected_files else "")
         if not file_path:
             self.set_preview_message("미리보기 대기 중")
+            self.clear_preview_plot()
+            self.clear_inline_result()
+            return
+
+        if file_path.lower().endswith(".pdf"):
+            if self.refresh_pdf_filtered_preview():
+                return
+            self.set_preview_message("PDF 영역을 지정하면 미리보기가 표시됩니다.")
             self.clear_preview_plot()
             self.clear_inline_result()
             return

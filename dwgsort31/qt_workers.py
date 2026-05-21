@@ -8,6 +8,8 @@ from .excel_compat import filter_graph_points_24, process_excel_data, save_compa
 from .excel_compat33 import filter_graph_points_33, save_compat_33_excel
 from .extended_save import save_extended_31_excel
 from .pdf_lazy import process_pdf_with_30
+from .pdf_point_filter import filter_pdf_graph_points
+
 
 
 class AnalysisWorker(QObject):
@@ -83,18 +85,27 @@ class AnalysisWorker(QObject):
                 if raw_df is None or raw_df.empty:
                     raise ValueError("추출된 데이터가 없습니다.")
 
-                filter_func = (
-                    filter_graph_points_33
-                    if self.settings["save_mode"] == SAVE_MODE_COMPAT_33
-                    else filter_graph_points_24
-                )
-                filtered_df = filter_func(
-                    raw_df,
-                    self._log,
-                    self.settings["slope"],
-                    self.settings["max_dist"],
-                    peak_prominence=self.settings.get("peak_prominence", 0.30),
-                )
+                if lower.endswith(".pdf"):
+                    filtered_df = filter_pdf_graph_points(
+                        raw_df,
+                        self._log,
+                        self.settings["slope"],
+                        self.settings["max_dist"],
+                        self.settings.get("peak_prominence", 0.30),
+                    )
+                else:
+                    filter_func = (
+                        filter_graph_points_33
+                        if self.settings["save_mode"] == SAVE_MODE_COMPAT_33
+                        else filter_graph_points_24
+                    )
+                    filtered_df = filter_func(
+                        raw_df,
+                        self._log,
+                        self.settings["slope"],
+                        self.settings["max_dist"],
+                        peak_prominence=self.settings.get("peak_prominence", 0.30),
+                    )
                 self._emit_progress(base + span * 0.78, file_name)
 
                 output_path = os.path.join(
