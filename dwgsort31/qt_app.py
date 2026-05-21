@@ -545,29 +545,15 @@ class MainWindow(QMainWindow):
             self.show_message("PDF 결과 없음", "PDF 선택 영역에서 그래프로 표시할 매칭 결과를 만들지 못했습니다.", error=True)
             return
 
-        self.last_filtered_df = filter_pdf_graph_points(
-            self.pdf_profile_match_df,
-            self.append_log,
-            self.slope_spin.value(),
-            self.max_dist_spin.value(),
-            self.peak_prominence_spin.value(),
-        )
-        if self.last_filtered_df.empty:
+        self.last_saved_path = None
+        success = self.refresh_pdf_filtered_preview()
+        if not success or self.last_filtered_df is None or self.last_filtered_df.empty:
             self.last_filtered_df = None
             self.last_saved_path = None
             self.clear_inline_result()
             self.show_message("PDF 결과 없음", "PDF 선택 영역에서 점 정리 후 결과가 비어 있습니다.", error=True)
             return
-        self.last_saved_path = None
-        self._populate_table(self.last_filtered_df)
-        self.draw_inline_preview(self.last_filtered_df)
-        self._update_summary(
-            {
-                "line_count": 1,
-                "page_count": self.pdf_region_config["page_end"] - self.pdf_region_config["page_start"] + 1,
-                "quantity_count": int(len(self.last_filtered_df)),
-            }
-        )
+
         self.set_preview_message("PDF 추출 결과 미리보기")
         self.set_status("PDF 추출 결과 준비 완료")
         self._set_working(False)
