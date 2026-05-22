@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import math
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QThread
@@ -8,6 +9,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
@@ -51,6 +53,7 @@ from .excel_compat import add_result_column, filter_graph_points_24, process_exc
 from .excel_compat33 import filter_graph_points_33
 from .pdf_region_dialog import PdfRegionDialog
 from .pdf_vector_parser import analyze_pdf_label_rows, extract_pdf_region_text, match_pdf_profile_rows
+from .pdf_point_filter import filter_pdf_graph_points
 from .qt_styles import apply_fluent_theme
 from .qt_widgets import Card, DropZone, MetricCard, make_button
 from .qt_workers import AnalysisWorker
@@ -68,14 +71,16 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        self.setWindowTitle("CAD PDF Converter Pro - DWG Sort 3.3")
+        self.setWindowTitle("CAD PDF Converter Pro - DWG Sort 4.0")
         self.resize(1280, 820)
         self.setMinimumSize(600, 500)
         self.selected_files = []
         self.worker = None
         self.thread = None
+        self.last_raw_preview_df = None
         self.last_filtered_df = None
         self.last_saved_path = None
+        self.preview_source_path = None
         self.pdf_region_config = None
         self.pdf_region_text_df = None
         self.pdf_region_text_items = []
@@ -217,25 +222,21 @@ class MainWindow(QMainWindow):
         self.tolerance_spin.setRange(0.1, 1000.0)
         self.tolerance_spin.setSingleStep(0.5)
         self.tolerance_spin.setValue(DEFAULT_TOLERANCE)
-        self.tolerance_spin.valueChanged.connect(self.update_inline_preview)
 
         self.slope_spin = QDoubleSpinBox()
         self.slope_spin.setRange(0.0, 10.0)
         self.slope_spin.setSingleStep(0.01)
         self.slope_spin.setValue(DEFAULT_SLOPE_CHANGE)
-        self.slope_spin.valueChanged.connect(self.update_inline_preview)
 
         self.max_dist_spin = QDoubleSpinBox()
         self.max_dist_spin.setRange(1.0, 100000.0)
         self.max_dist_spin.setSingleStep(10.0)
         self.max_dist_spin.setValue(DEFAULT_MAX_DISTANCE)
-        self.max_dist_spin.valueChanged.connect(self.update_inline_preview)
 
         self.peak_prominence_spin = QDoubleSpinBox()
         self.peak_prominence_spin.setRange(0.0, 10.0)
         self.peak_prominence_spin.setSingleStep(0.05)
         self.peak_prominence_spin.setValue(DEFAULT_PEAK_PROMINENCE)
-        self.peak_prominence_spin.valueChanged.connect(self.update_inline_preview)
 
         self.pdf_start_spin = QSpinBox()
         self.pdf_start_spin.setRange(1, 100000)
@@ -299,6 +300,31 @@ class MainWindow(QMainWindow):
             grid.addLayout(box, 1, idx)
             grid.setColumnStretch(idx, 1)
 
+        settings_actions = QHBoxLayout()
+        settings_actions.setContentsMargins(0, 0, 0, 0)
+        settings_actions.setSpacing(4)
+        settings_actions.addStretch(1)
+        self.round_distance_check = QCheckBox("올림설정")
+        self.round_distance_check.setFixedHeight(28)
+        self.apply_settings_button = make_button("\uc801\uc6a9", primary=True)
+        self.reset_settings_button = make_button("\ucd08\uae30\ud654")
+        self.apply_settings_button.setFixedHeight(28)
+        self.reset_settings_button.setFixedHeight(28)
+        self.apply_settings_button.setFixedWidth(58)
+        self.reset_settings_button.setFixedWidth(68)
+        self.apply_settings_button.clicked.connect(self.apply_conversion_settings)
+        self.reset_settings_button.clicked.connect(self.reset_conversion_preview)
+        settings_actions.addWidget(self.round_distance_check)
+        settings_actions.addWidget(self.apply_settings_button)
+        settings_actions.addWidget(self.reset_settings_button)
+
+        card.layout.removeWidget(card.title_label)
+        settings_header = QHBoxLayout()
+        settings_header.setContentsMargins(0, 0, 0, 0)
+        settings_header.setSpacing(6)
+        settings_header.addWidget(card.title_label, 1)
+        settings_header.addLayout(settings_actions, 0)
+        card.layout.addLayout(settings_header)
         card.layout.addLayout(grid)
         return card
 
@@ -354,6 +380,17 @@ class MainWindow(QMainWindow):
         self.result_card = card
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.result_title_label = card.title_label
+        card.layout.removeWidget(card.title_label)
+
+        result_header = QHBoxLayout()
+        result_header.setContentsMargins(0, 0, 0, 0)
+        result_header.setSpacing(6)
+        result_header.addWidget(card.title_label, 1)
+        self.copy_profile_button = make_button("복사")
+        self.copy_profile_button.setFixedSize(44, 24)
+        self.copy_profile_button.clicked.connect(self.copy_profile_columns)
+        result_header.addWidget(self.copy_profile_button, 0, Qt.AlignRight | Qt.AlignVCenter)
+        card.layout.addLayout(result_header)
 
         stats = QGridLayout()
         stats.setHorizontalSpacing(6)
@@ -382,15 +419,7 @@ class MainWindow(QMainWindow):
         copy_shortcut = QShortcut(QKeySequence.Copy, self.table)
         copy_shortcut.activated.connect(self.copy_table_selection)
 
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(6)
-        header.addWidget(self.table, 1)
-        self.copy_profile_button = make_button("복사")
-        self.copy_profile_button.setFixedSize(44, 24)
-        self.copy_profile_button.clicked.connect(self.copy_profile_columns)
-        header.addWidget(self.copy_profile_button)
-        card.layout.addLayout(header, 1)
+        card.layout.addWidget(self.table, 1)
         return card
 
     def _build_log_card(self):
@@ -501,6 +530,8 @@ class MainWindow(QMainWindow):
         self.pdf_region_text_items = items
         self.pdf_label_rows = {}
         self.pdf_profile_match_df = None
+        self.last_raw_preview_df = None
+        self.preview_source_path = file_path
         if df.empty:
             self.show_message(
                 "PDF 텍스트 없음",
@@ -538,23 +569,17 @@ class MainWindow(QMainWindow):
             pdf_x_tolerance=self.pdf_region_config.get("pdf_x_tolerance", 10.0),
         )
         if self.pdf_profile_match_df.empty:
+            self.last_raw_preview_df = None
             self.last_filtered_df = None
             self.last_saved_path = None
             self.clear_inline_result()
             self.show_message("PDF 결과 없음", "PDF 선택 영역에서 그래프로 표시할 매칭 결과를 만들지 못했습니다.", error=True)
             return
 
-        self.last_filtered_df = self.pdf_profile_match_df
         self.last_saved_path = None
-        self._populate_table(self.last_filtered_df)
-        self.draw_inline_preview(self.last_filtered_df)
-        self._update_summary(
-            {
-                "line_count": 1,
-                "page_count": self.pdf_region_config["page_end"] - self.pdf_region_config["page_start"] + 1,
-                "quantity_count": int(len(self.last_filtered_df)),
-            }
-        )
+        self.last_raw_preview_df = self.pdf_profile_match_df.copy()
+        self.show_preview_dataframe(self.last_raw_preview_df, "PDF 전체 점 미리보기")
+
         self.set_preview_message("PDF 추출 결과 미리보기")
         self.set_status("PDF 추출 결과 준비 완료")
         self._set_working(False)
@@ -593,27 +618,154 @@ class MainWindow(QMainWindow):
         try:
             self.set_status("그래프 미리보기 계산 중")
             self.append_log(f"[미리보기] {os.path.basename(file_path)} 계산 중")
-            df_result = process_excel_data(file_path, self.append_log, self.tolerance_spin.value())
-            if df_result is None or df_result.empty:
+            if (
+                self.last_filtered_df is not None
+                and self.preview_source_path == file_path
+                and not self.last_filtered_df.empty
+            ):
+                preview_df = self.last_filtered_df
+            else:
+                preview_df = process_excel_data(file_path, self.append_log, self.tolerance_spin.value())
+            if preview_df is None or preview_df.empty:
                 self.show_message("미리보기 실패", "그래프를 그릴 데이터를 추출하지 못했습니다.", error=True)
                 self.set_status("미리보기 실패")
                 return
-
-            filtered_df = self.current_filter_func()(
-                df_result,
-                self.append_log,
-                self.slope_spin.value(),
-                self.max_dist_spin.value(),
-                peak_prominence=self.peak_prominence_spin.value(),
-            )
             from .plotting import preview_profile
 
-            preview_profile(filtered_df, f"종단면도 미리보기: {os.path.basename(file_path)}")
+            preview_profile(preview_df, f"종단면도 미리보기: {os.path.basename(file_path)}")
             self.set_status("그래프 미리보기 완료")
         except Exception as exc:
             self.append_log(f"미리보기 오류: {exc}")
             self.show_message("미리보기 오류", str(exc), error=True)
             self.set_status("미리보기 오류")
+
+    def refresh_pdf_filtered_preview(self):
+        if self.pdf_profile_match_df is None or self.pdf_profile_match_df.empty:
+            return False
+
+        filtered_df = filter_pdf_graph_points(
+            self.pdf_profile_match_df,
+            self.append_log,
+            self.slope_spin.value(),
+            self.max_dist_spin.value(),
+            self.peak_prominence_spin.value(),
+        )
+        filtered_df = self._apply_distance_rounding_filter(filtered_df)
+
+        if filtered_df.empty:
+            self.last_filtered_df = None
+            self.clear_inline_result()
+            self.set_preview_message("PDF 점 정리 결과가 비어 있습니다.")
+            return True
+
+        self.last_filtered_df = filtered_df
+        self.last_saved_path = None
+        self._populate_table(filtered_df)
+        self.draw_inline_preview(filtered_df)
+
+        line_count = 1
+        if "line_id" in filtered_df.columns:
+            line_count = int(filtered_df["line_id"].nunique())
+        elif "라인명" in filtered_df.columns:
+            line_count = int(filtered_df["라인명"].nunique())
+
+        page_count = 0
+        if "페이지" in filtered_df.columns:
+            page_count = int(filtered_df["페이지"].nunique())
+        elif "PDF페이지" in filtered_df.columns:
+            page_count = int(filtered_df["PDF페이지"].nunique())
+        elif self.pdf_region_config:
+            page_count = self.pdf_region_config["page_end"] - self.pdf_region_config["page_start"] + 1
+
+        self._update_summary(
+            {
+                "line_count": line_count,
+                "page_count": page_count,
+                "quantity_count": int(len(filtered_df)),
+            }
+        )
+        self.set_preview_message("PDF 변환 설정 반영 미리보기")
+        self.set_status("PDF 변환 설정 반영 완료")
+        self._set_working(False)
+        self.apply_responsive_layout()
+        return True
+
+    def _apply_distance_rounding_filter(self, df):
+        if (
+            df is None
+            or df.empty
+            or "누가거리" not in df.columns
+            or not getattr(self, "round_distance_check", None)
+            or not self.round_distance_check.isChecked()
+        ):
+            return df
+
+        result_df = df.copy()
+        group_col = None
+        if "line_id" in result_df.columns:
+            group_col = "line_id"
+        elif "라인명" in result_df.columns:
+            group_col = "라인명"
+
+        keep_indexes = []
+        seen = set()
+        removed_count = 0
+
+        for index, row in result_df.iterrows():
+            numeric_distance = self._parse_numeric_distance(row.get("누가거리"))
+            if numeric_distance is None:
+                keep_indexes.append(index)
+                continue
+
+            rounded_distance = math.ceil(numeric_distance)
+            line_key = row.get(group_col) if group_col else "all"
+            duplicate_key = (line_key, rounded_distance)
+            if duplicate_key in seen:
+                removed_count += 1
+                continue
+
+            seen.add(duplicate_key)
+            result_df.at[index, "누가거리"] = str(rounded_distance)
+            keep_indexes.append(index)
+
+        result_df = result_df.loc[keep_indexes].copy()
+        if "증가거리" in result_df.columns:
+            result_df = self._recalculate_increase_distance(result_df)
+
+        self.append_log(
+            f"[올림설정] 누가거리 정수 올림 적용: 중복 {removed_count}행 제거"
+        )
+        return result_df
+
+    def _recalculate_increase_distance(self, df):
+        result_df = df.copy()
+        group_col = None
+        if "line_id" in result_df.columns:
+            group_col = "line_id"
+        elif "라인명" in result_df.columns:
+            group_col = "라인명"
+        groups = result_df.groupby(group_col, sort=False) if group_col else [("all", result_df)]
+        result_df["증가거리"] = "-"
+
+        for _, group_df in groups:
+            previous = None
+            for index, value in group_df["누가거리"].items():
+                current = self._parse_numeric_distance(value)
+                if current is None:
+                    previous = None
+                    continue
+                if previous is not None:
+                    result_df.at[index, "증가거리"] = f"{current - previous:.0f}"
+                previous = current
+
+        return result_df
+
+    @staticmethod
+    def _parse_numeric_distance(value):
+        try:
+            return float(str(value).strip().replace(",", ""))
+        except (TypeError, ValueError):
+            return None
 
     def update_inline_preview(self):
         if not hasattr(self, "preview_canvas"):
@@ -623,6 +775,22 @@ class MainWindow(QMainWindow):
         file_path = item.text() if item else (self.selected_files[0] if self.selected_files else "")
         if not file_path:
             self.set_preview_message("미리보기 대기 중")
+            self.clear_preview_plot()
+            self.clear_inline_result()
+            return
+
+        if file_path.lower().endswith(".pdf"):
+            if (
+                self.pdf_profile_match_df is not None
+                and not self.pdf_profile_match_df.empty
+                and self.pdf_region_config
+                and self.pdf_region_config.get("file") == file_path
+            ):
+                self.last_raw_preview_df = self.pdf_profile_match_df.copy()
+                self.preview_source_path = file_path
+                self.show_preview_dataframe(self.last_raw_preview_df, "PDF 전체 점 미리보기")
+                return
+            self.set_preview_message("PDF 영역을 지정하면 미리보기가 표시됩니다.")
             self.clear_preview_plot()
             self.clear_inline_result()
             return
@@ -644,22 +812,17 @@ class MainWindow(QMainWindow):
                 self.clear_inline_result()
                 return
 
-            filtered_df = self.current_filter_func()(
-                df_result,
-                lambda _message: None,
-                self.slope_spin.value(),
-                self.max_dist_spin.value(),
-                peak_prominence=self.peak_prominence_spin.value(),
-            )
-            self.last_filtered_df = filtered_df
+            self.last_raw_preview_df = df_result.copy()
+            self.preview_source_path = file_path
+            self.last_filtered_df = df_result.copy()
             self.last_saved_path = None
-            self.draw_inline_preview(filtered_df)
-            self._populate_table(filtered_df)
+            self.draw_inline_preview(self.last_filtered_df)
+            self._populate_table(self.last_filtered_df)
             self._update_summary(
                 {
                     "line_count": 1,
                     "page_count": 0,
-                    "quantity_count": int(len(filtered_df)),
+                    "quantity_count": int(len(self.last_filtered_df)),
                 }
             )
             self.set_preview_message(f"선택 파일 미리보기: {os.path.basename(file_path)}")
@@ -670,6 +833,137 @@ class MainWindow(QMainWindow):
             self.clear_preview_plot()
             self.clear_inline_result()
             self.apply_responsive_layout()
+
+    def show_preview_dataframe(self, df, message):
+        if df is None or df.empty:
+            self.clear_inline_result()
+            self.clear_preview_plot()
+            self.set_preview_message(message)
+            return
+
+        self.last_filtered_df = df.copy()
+        self.last_saved_path = None
+        self._populate_table(self.last_filtered_df)
+        self.draw_inline_preview(self.last_filtered_df)
+        self._update_summary(self._build_preview_summary(self.last_filtered_df))
+        self.set_preview_message(message)
+        self._set_working(False)
+        self.apply_responsive_layout()
+
+    def _build_preview_summary(self, df):
+        line_count = 1
+        if "line_id" in df.columns:
+            line_count = int(df["line_id"].nunique())
+        elif "라인명" in df.columns:
+            line_count = int(df["라인명"].nunique())
+
+        page_count = 0
+        if "페이지" in df.columns:
+            page_count = int(df["페이지"].nunique())
+        elif "PDF페이지" in df.columns:
+            page_count = int(df["PDF페이지"].nunique())
+        elif self.pdf_region_config and self.preview_source_path == self.pdf_region_config.get("file"):
+            page_count = self.pdf_region_config["page_end"] - self.pdf_region_config["page_start"] + 1
+
+        return {
+            "line_count": line_count,
+            "page_count": page_count,
+            "quantity_count": int(len(df)),
+        }
+
+    def apply_conversion_settings(self):
+        item = self.file_list.currentItem()
+        file_path = item.text() if item else (self.selected_files[0] if self.selected_files else "")
+        if not file_path:
+            self.show_message("파일 필요", "먼저 PDF 또는 Excel 파일을 선택하세요.", error=True)
+            return
+
+        try:
+            if file_path.lower().endswith(".pdf"):
+                if (
+                    self.pdf_profile_match_df is None
+                    or self.pdf_profile_match_df.empty
+                    or not self.pdf_region_config
+                    or self.pdf_region_config.get("file") != file_path
+                ):
+                    self.show_message("PDF 영역 필요", "먼저 PDF 영역을 지정해 전체 점을 추출하세요.", error=True)
+                    return
+                self.last_raw_preview_df = self.pdf_profile_match_df.copy()
+                self.preview_source_path = file_path
+                filtered_df = filter_pdf_graph_points(
+                    self.last_raw_preview_df,
+                    self.append_log,
+                    self.slope_spin.value(),
+                    self.max_dist_spin.value(),
+                    self.peak_prominence_spin.value(),
+                )
+                filtered_df = self._apply_distance_rounding_filter(filtered_df)
+                self.show_preview_dataframe(filtered_df, "PDF 변환 설정 적용 미리보기")
+                self.set_status("PDF 변환 설정 적용 완료")
+                return
+
+            if file_path.lower().endswith((".xls", ".xlsx")):
+                raw_df = process_excel_data(file_path, self.append_log, self.tolerance_spin.value())
+                if raw_df is None or raw_df.empty:
+                    self.show_message("미리보기 실패", "전체 점 데이터를 추출하지 못했습니다.", error=True)
+                    return
+                self.last_raw_preview_df = raw_df.copy()
+                self.preview_source_path = file_path
+                filtered_df = self.current_filter_func()(
+                    raw_df,
+                    self.append_log,
+                    self.slope_spin.value(),
+                    self.max_dist_spin.value(),
+                    peak_prominence=self.peak_prominence_spin.value(),
+                )
+                filtered_df = self._apply_distance_rounding_filter(filtered_df)
+                self.show_preview_dataframe(filtered_df, "Excel 변환 설정 적용 미리보기")
+                self.set_status("Excel 변환 설정 적용 완료")
+                return
+
+            self.show_message("지원하지 않는 파일", "PDF 또는 Excel 파일을 선택하세요.", error=True)
+        except Exception as exc:
+            self.append_log(f"설정 적용 오류: {exc}")
+            self.show_message("설정 적용 오류", str(exc), error=True)
+
+    def reset_conversion_preview(self):
+        item = self.file_list.currentItem()
+        file_path = item.text() if item else (self.selected_files[0] if self.selected_files else "")
+        if not file_path:
+            self.set_status("미리보기 초기화 완료")
+            return
+
+        try:
+            if file_path.lower().endswith(".pdf"):
+                if (
+                    self.pdf_profile_match_df is not None
+                    and not self.pdf_profile_match_df.empty
+                    and self.pdf_region_config
+                    and self.pdf_region_config.get("file") == file_path
+                ):
+                    self.last_raw_preview_df = self.pdf_profile_match_df.copy()
+                    self.preview_source_path = file_path
+                    self.show_preview_dataframe(self.last_raw_preview_df, "PDF 전체 점 미리보기")
+                else:
+                    self.update_inline_preview()
+                self.set_status("전체 점 미리보기로 초기화 완료")
+                return
+
+            if file_path.lower().endswith((".xls", ".xlsx")):
+                raw_df = process_excel_data(file_path, self.append_log, self.tolerance_spin.value())
+                if raw_df is None or raw_df.empty:
+                    self.show_message("미리보기 실패", "전체 점 데이터를 추출하지 못했습니다.", error=True)
+                    return
+                self.last_raw_preview_df = raw_df.copy()
+                self.preview_source_path = file_path
+                self.show_preview_dataframe(self.last_raw_preview_df, "Excel 전체 점 미리보기")
+                self.set_status("전체 점 미리보기로 초기화 완료")
+                return
+
+            self.update_inline_preview()
+        except Exception as exc:
+            self.append_log(f"미리보기 초기화 오류: {exc}")
+            self.show_message("미리보기 초기화 오류", str(exc), error=True)
 
     def set_preview_message(self, message):
         if hasattr(self, "preview_message"):
@@ -693,8 +987,10 @@ class MainWindow(QMainWindow):
     def clear_inline_result(self):
         if hasattr(self, "table"):
             self.table.setRowCount(0)
+        self.last_raw_preview_df = None
         self.last_filtered_df = None
         self.last_saved_path = None
+        self.preview_source_path = None
         if hasattr(self, "metric_lines"):
             self._update_summary(
                 {"line_count": 0, "page_count": 0, "diameter_count": 0, "quantity_count": 0}
@@ -854,6 +1150,7 @@ class MainWindow(QMainWindow):
             "페이지",
             "누가거리",
             "관저고",
+            "증가거리",
             "누가거리 X",
             "관저고 X",
             "원본 누가거리",
@@ -974,8 +1271,12 @@ class MainWindow(QMainWindow):
         self.percent_label.setText("0%")
         self.eta_label.setText("예상 남은 시간: -")
         self.current_label.setText("대기 중")
+        self.last_raw_preview_df = None
         self.last_filtered_df = None
         self.last_saved_path = None
+        self.preview_source_path = None
+        if hasattr(self, "round_distance_check"):
+            self.round_distance_check.setChecked(False)
         self._update_summary({"line_count": 0, "page_count": 0, "diameter_count": 0, "quantity_count": 0})
         self.set_preview_message("미리보기 대기 중")
         self.set_status("준비 완료")
@@ -1011,6 +1312,12 @@ class MainWindow(QMainWindow):
         self.drop_zone.pdf_region_button.setDisabled(working or not has_pdf)
         self.remove_file_button.setDisabled(working or not self.selected_files)
         self.clear_file_button.setDisabled(working or not self.selected_files)
+        if hasattr(self, "apply_settings_button"):
+            self.apply_settings_button.setDisabled(working or not self.selected_files)
+        if hasattr(self, "reset_settings_button"):
+            self.reset_settings_button.setDisabled(working or self.last_raw_preview_df is None)
+        if hasattr(self, "round_distance_check"):
+            self.round_distance_check.setDisabled(working)
         if hasattr(self, "copy_profile_button"):
             self.copy_profile_button.setDisabled(working or self.last_filtered_df is None)
 
@@ -1109,7 +1416,7 @@ class TitleBar(QFrame):
         layout.setContentsMargins(12, 4, 8, 4)
         layout.setSpacing(8)
 
-        title = QLabel("▣  CAD PDF Converter Pro - DWG Sort 3.3")
+        title = QLabel("▣  CAD PDF Converter Pro - DWG Sort 4.0")
         title.setStyleSheet("font-size: 12px; font-weight: 700; background: transparent;")
         layout.addWidget(title, 1)
 

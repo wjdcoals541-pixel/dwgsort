@@ -284,6 +284,7 @@ def match_pdf_profile_rows(
 
         for distance in distance_numbers:
             status = []
+            increase_distance = None
             distance_value = _parse_number(distance["contents"])
             if distance_value is None:
                 status.append("누가거리 숫자 변환 실패")
@@ -297,12 +298,14 @@ def match_pdf_profile_rows(
                     )
                     line_id += 1
                     line_counts[line_id] = 0
-                elif distance_value <= previous_distance:
-                    status.append("누가거리 증가 검증 실패")
-                    log_func(
-                        "[PDF][WARN] 누가거리 값이 증가하지 않습니다. "
-                        f"페이지 {page}, 값: {previous_distance:g} -> {distance_value:g}"
-                    )
+                else:
+                    increase_distance = distance_value - previous_distance
+                    if distance_value <= previous_distance:
+                        status.append("누가거리 증가 검증 실패")
+                        log_func(
+                            "[PDF][WARN] 누가거리 값이 증가하지 않습니다. "
+                            f"페이지 {page}, 값: {previous_distance:g} -> {distance_value:g}"
+                        )
             if distance_value is not None:
                 previous_distance = distance_value
             line_counts[line_id] = line_counts.get(line_id, 0) + 1
@@ -344,6 +347,7 @@ def match_pdf_profile_rows(
                     "페이지": page,
                     "누가거리": _format_distance(distance_value),
                     "관저고": _format_elevation(elevation_value),
+                    "증가거리": _format_distance(increase_distance),
                     "누가거리 X": _format_coord(distance["x"]),
                     "관저고 X": _format_coord(nearest_elevation["x"]) if nearest_elevation else "-",
                     "X오차": _format_coord(nearest_x_diff) if nearest_x_diff is not None else "-",
@@ -711,6 +715,7 @@ def _profile_dataframe(records):
         "페이지",
         "누가거리",
         "관저고",
+        "증가거리",
         "누가거리 X",
         "관저고 X",
         "X오차",

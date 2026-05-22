@@ -1,294 +1,301 @@
-# DWGSort
+# DWGSort 4.0 Minimal
 
-DWGSort is a Python/PySide desktop tool for extracting profile data from CAD-related files and drawing/saving distance-elevation results.
+DWGSort 4.0은 CAD에서 추출한 Excel/XLS 데이터 또는 CAD에서 내보낸 벡터 PDF에서 종단면도용 `누가거리`와 `관저고` 값을 추출하고, 그래프 미리보기와 CSV/Excel 저장을 제공하는 Windows 데스크톱 프로그램입니다.
 
-Current main branch target: **DWG Sort 4.0**.
+이 폴더는 원본 프로젝트에서 실행에 필요한 최소 파일만 복사한 `project_minimal` 버전입니다. Git 히스토리, 가상환경, 캐시, 샘플 결과 CSV, 백업 모듈은 포함하지 않습니다.
 
-4.0 keeps the existing 3.3 Excel/XLS workflow intact and adds support for **vector PDFs exported from CAD**. Scanned PDFs and OCR are intentionally not supported in 4.0.
+## 실행 방법
 
-## Quick Start
+권장 실행:
 
-```bat
-DWGSort_4.0_실행.bat
-```
-
-Alternative legacy run scripts are also kept:
-
-```bat
-run.bat
-run_and_test.bat
-run_auto_reload.bat
-```
-
-Main Python entry point:
-
-```bash
+```powershell
+cd E:\ai\pythonpythonpython\dwgsort\dwgsort\project_minimal
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install -r requirements.txt
 python cad_converter_qt.py
 ```
 
-## What 4.0 Does
+배치 파일 실행:
 
-### Existing Excel Flow
-
-The original XLS flow is preserved:
-
-1. User selects XLS files extracted from DWG `DATAEXTRACTION`.
-2. The app reads Excel-like `Contents` and `Position` data.
-3. It finds the Korean labels `누가거리` and `관저고`.
-4. It collects numbers near each label row by Y coordinate.
-5. It matches distance/elevation values by nearby X coordinate.
-6. It previews the graph.
-7. It saves result data to CSV/Excel.
-
-Current graph behavior:
-
-- Graphs are shown inside the program or in a matplotlib preview window.
-- Graph images are not saved.
-- Graphs are not inserted into Excel files.
-- CSV/Excel export stores result data, not graph images.
-
-### New Vector PDF Flow
-
-4.0 adds vector PDF processing for CAD-exported PDFs only:
-
-1. User selects a PDF file.
-2. User clicks `PDF 영역 지정`.
-3. The PDF preview dialog opens.
-4. User chooses the data area by drag selection or two-point selection.
-5. The app expands the selected area before extraction.
-6. PyMuPDF extracts vector text objects inside the expanded area.
-7. Extracted PDF text is converted into an Excel-like internal structure:
-
-```json
-{
-  "page": 1,
-  "contents": "10.00",
-  "x": 240.10,
-  "y": 340.40,
-  "bbox": [230.0, 335.0, 250.0, 345.0],
-  "rotation": 0
-}
+```powershell
+cd E:\ai\pythonpythonpython\dwgsort\dwgsort\project_minimal
+.\DWGSort_4.0_실행.bat
 ```
 
-8. The app finds `누가거리` and `관저고` labels.
-9. It clusters numeric text by Y coordinate into rows.
-10. It selects the true distance row and true elevation row.
-11. It matches values by X coordinate.
-12. It splits multiple profile lines with `line_id` when distance drops sharply.
-13. It shows a read-only result table.
-14. It uses the existing graph preview and CSV/Excel result save flow.
+`DWGSort_4.0_실행.bat`는 현재 폴더의 `.venv\Scripts\python.exe`가 있으면 그것을 사용하고, 없으면 시스템 `python`으로 `cad_converter_qt.py`를 실행합니다.
 
-## Important 4.0 Limits
+## 필요한 패키지
 
-Do not add these to 4.0 unless the product direction changes:
+`requirements.txt`:
 
-- No OCR.
-- No scanned PDF support.
-- No PDF coordinate preset saving.
-- No manual editing of extracted result values.
-- No graph image saving.
-- No Excel embedded chart insertion.
-- Do not mix Excel and PDF in one processing run.
-- Do not change the existing Excel/XLS logic unless fixing a proven regression.
+- `PySide6`: GUI
+- `pandas`: Excel/PDF 추출 결과 데이터 처리
+- `matplotlib`: 그래프 미리보기
+- `openpyxl`: `.xlsx` 저장
+- `xlrd`: `.xls` 읽기
+- `PyMuPDF`: 벡터 PDF 렌더링과 텍스트 추출
 
-## PDF Region Selection UI
+## 프로그램 목적
 
-Implemented in `dwgsort31/pdf_region_dialog.py`.
+- DWG `DATAEXTRACTION` 등에서 나온 Excel 형식의 `Contents`, `Position` 데이터를 읽습니다.
+- CAD에서 내보낸 벡터 PDF의 선택 영역에서 텍스트 좌표를 추출합니다.
+- `누가거리`와 `관저고` 행을 찾아 거리-고도 쌍으로 매칭합니다.
+- 처음에는 가능한 전체 점을 보여주고, 사용자가 원할 때만 변환 설정을 적용해 점을 정리합니다.
+- 결과를 표, 그래프, Excel, CSV로 확인하거나 저장합니다.
 
-Supported controls:
+## 지원 파일
 
-- Drag selection.
-- Two-point selection.
-- First point preview rectangle while moving the mouse.
-- Esc cancels the first point in two-point mode.
-- Mouse wheel zoom.
-- Right-drag pan.
-- Space + left-drag pan.
-- Arrow keys move the selected box.
-- Shift + arrow moves by 10 px.
-- Ctrl + arrow resizes the selected box.
-- Zoom buttons: `전체 보기`, `가로폭 맞춤`, `100%`, `200%`, `400%`, `800%`.
-- `영역 검사` previews extraction and row detection before applying.
+- Excel: `.xls`, `.xlsx`
+- PDF: CAD에서 내보낸 벡터 PDF
 
-Overlay legend:
+지원하지 않는 것:
 
-- Blue solid box: user-selected original region.
-- Sky-blue dashed/transparent box: actual extraction region after automatic expansion.
-- Yellow horizontal band: selected `누가거리` row.
-- Green horizontal band: selected `관저고` row.
-- Gray/red faint bands: excluded candidate rows such as `구간거리`, `지반고`, or `토피`.
-- Optional X-match lines are shown only when `X매칭 보기` is enabled.
+- 스캔 PDF
+- OCR
+- 이미지 기반 도면 판독
+- PDF 좌표 프리셋 저장
+- 추출 결과 수동 편집
+- 그래프 이미지 저장
+- Excel 내부 차트 삽입
+- Excel과 PDF를 한 번의 처리 작업에서 섞는 방식
 
-The sky-blue extraction box is intentionally larger than the selected box. It uses about 15% padding so the user can select the numeric table area roughly while still capturing labels that sit slightly to the left or nearby.
-
-## PDF Detection Settings
-
-Defined in `dwgsort31/config.py`:
-
-```python
-PDF_Y_TOLERANCE = 5.0
-PDF_X_TOLERANCE = 10.0
-PDF_ROW_CLUSTER_TOLERANCE = 1.5
-PDF_REGION_PAD_RATIO = 0.15
-```
-
-Meaning:
-
-- `PDF_Y_TOLERANCE`: how far from a label Y coordinate candidate numeric rows may be.
-- `PDF_X_TOLERANCE`: max X distance for distance/elevation matching.
-- `PDF_ROW_CLUSTER_TOLERANCE`: how tightly numeric text is grouped into the same row.
-- `PDF_REGION_PAD_RATIO`: automatic extraction padding based on selected region size.
-
-These PDF values are separate from Excel settings.
-
-## PDF Row Selection Logic
-
-Implemented mainly in `dwgsort31/pdf_vector_parser.py`.
-
-The parser does not simply take every number near the label Y coordinate. That caused bugs when CAD PDFs extracted labels like:
-
-- `구간거리누가거리`
-- `지반고관저고토피`
-
-Instead it now:
-
-1. Extracts all numeric text inside the actual extraction region.
-2. Clusters numbers into Y rows.
-3. Finds candidate rows near the labels.
-4. Scores `누가거리` rows by monotonic increase, value range, and count.
-5. Picks the true cumulative distance row.
-6. Picks the `관저고` row, preferring the middle row when `지반고/관저고/토피` are all present.
-7. Logs selected and excluded rows with reasons.
-
-This prevents `구간거리` values from being mixed into `누가거리`, and prevents `지반고` or `토피` from being used as `관저고`.
-
-## Result Data
-
-PDF result preview table columns:
-
-- `line_id`
-- `페이지`
-- `누가거리`
-- `관저고`
-- `누가거리 X`
-- `관저고 X`
-- `원본 누가거리`
-- `원본 관저고`
-- `상태`
-
-Default CSV/Excel export stays simple:
-
-- `관저고`
-- `누가거리`
-- `결과`
-
-Debug columns are shown in the UI where useful, but they are not mixed into the default saved result format.
-
-## Folder Structure
+## 기본 실행 흐름
 
 ```text
-.
-+-- DWGSort_4.0_실행.bat       # One-click Windows launcher for 4.0
-+-- README.md                  # Project and AI handoff documentation
-+-- cad_converter_qt.py        # Main Qt application entry point
-+-- run.bat                    # Legacy basic Windows run script
-+-- run_and_test.bat           # Legacy run/check helper
-+-- run_auto_reload.bat        # Legacy auto-reload run helper
-+-- videoframe_0.ico           # Application icon
-+-- UI_HANDOFF_FOR_CLAUDE.md   # Previous UI handoff notes
-+-- 결과__패치전.csv             # Sample/result data before patch
-+-- 결과__패치후.csv             # Sample/result data after patch
-+-- 3.3은 점찍기 로직개선.txt      # Note for the 3.3 point-logic change
-+-- dwgsort31/
-    +-- __init__.py            # Package marker
-    +-- config.py              # Shared config and PDF tolerance constants
-    +-- excel_compat.py        # Excel compatibility, parsing, and result save helpers
-    +-- excel_compat3.3.py     # 3.3 Excel compatibility/reference module
-    +-- excel_compat33.py      # 3.3 helper/backup module
-    +-- excel_compat__1.py     # Older Excel compatibility backup
-    +-- excel_compat__2.py     # Older Excel compatibility backup
-    +-- extended_save.py       # Extended save/export helpers
-    +-- pdf_lazy.py            # Lazy PDF loading helpers
-    +-- pdf_region_dialog.py   # PDF preview, selection, zoom, pan, overlays, inspection UI
-    +-- pdf_vector_parser.py   # Vector PDF text extraction, row detection, X matching, validation
-    +-- plotting.py            # Matplotlib plotting helpers, including line_id split support
-    +-- qt_app.py              # Main application window and Excel/PDF workflow orchestration
-    +-- qt_styles.py           # Qt stylesheet definitions
-    +-- qt_widgets.py          # Custom Qt widgets
-    +-- qt_workers.py          # Background worker logic
-    +-- utils.py               # Shared utility functions
+DWGSort_4.0_실행.bat
+  -> cad_converter_qt.py
+  -> dwgsort31.qt_app.main()
+  -> MainWindow
 ```
 
-## File Responsibilities For AI Maintainers
+직접 실행도 가능합니다.
 
-Start here:
+```powershell
+python cad_converter_qt.py
+```
 
-- `cad_converter_qt.py`: launches the Qt app.
-- `dwgsort31/qt_app.py`: main window, button wiring, result table, graph preview, save flow.
-- `dwgsort31/pdf_region_dialog.py`: PDF preview dialog and region selection UX.
-- `dwgsort31/pdf_vector_parser.py`: all vector PDF extraction and PDF-specific detection logic.
-- `dwgsort31/config.py`: PDF tolerance/padding constants and other shared configuration.
-- `dwgsort31/plotting.py`: graph rendering helpers; supports splitting PDF lines by `line_id`.
-- `dwgsort31/excel_compat.py`: existing Excel parsing/saving compatibility logic.
+## Excel 처리 방식
 
-When changing PDF behavior, prefer editing `pdf_vector_parser.py` and `pdf_region_dialog.py`.
+1. 사용자가 `.xls` 또는 `.xlsx` 파일을 선택합니다.
+2. `pandas.read_excel(..., sheet_name=None)`로 모든 시트를 읽어 합칩니다.
+3. `Contents`, `Position` 컬럼을 찾습니다.
+4. `Position`에서 X, Y 좌표를 파싱합니다.
+5. `누가거리`, `관저고` 라벨 행을 찾습니다.
+6. 변환 설정의 `Y오차`로 같은 행에 있는 숫자 후보를 찾습니다.
+7. X 좌표가 가까운 거리/고도 값을 매칭합니다.
+8. 처음 미리보기는 전체 점을 보여줍니다.
+9. `적용` 버튼을 누르면 기울기, 거리, 고점 설정으로 점 정리를 적용합니다.
+10. `초기화` 버튼을 누르면 설정값은 그대로 두고 미리보기/결과표만 전체 점으로 되돌립니다.
 
-When changing UI orchestration, edit `qt_app.py`.
+Excel에서 `Y오차`는 원본 점 추출에 사용됩니다.
 
-When changing graph drawing, check both `plotting.py` and graph-related methods in `qt_app.py`.
+## PDF 처리 방식
 
-Avoid touching Excel compatibility files for PDF-only changes.
+PDF는 두 흐름이 있습니다.
 
-## Debug Logging
+### 권장 흐름: PDF 영역 지정
 
-PDF logs are intentionally verbose because CAD PDF extraction can fail for layout reasons.
+1. 사용자가 PDF 파일을 선택합니다.
+2. `PDF 영역 지정` 버튼을 누릅니다.
+3. PDF 미리보기 창에서 표/데이터 영역을 선택합니다.
+4. 선택 영역은 자동으로 약간 확장되어 라벨 주변 텍스트까지 잡습니다.
+5. PyMuPDF가 벡터 텍스트와 좌표를 추출합니다.
+6. PDF 전용 설정값으로 라벨 행과 숫자 행을 찾습니다.
+7. `누가거리`, `관저고` 값을 X 좌표 기준으로 매칭합니다.
+8. 거리 값이 크게 되돌아가면 `line_id`를 나누어 여러 종단 라인을 표현합니다.
+9. 처음 미리보기는 전체 점을 보여줍니다.
+10. `적용` 버튼을 누르면 PDF 전용 점 정리를 적용합니다.
+11. `초기화` 버튼을 누르면 설정값은 그대로 두고 전체 점으로 되돌립니다.
 
-Useful log patterns:
+PDF 점 정리는 변환 설정의 `Y오차`를 사용하지 않습니다. PDF 점 정리는 `기울기`, `거리`, `고점`, 최소 간격 1.0m 기준만 사용합니다.
+
+### Legacy 흐름: 직접 PDF 변환 시작
+
+`dwgsort31/qt_workers.py`는 PDF 파일을 직접 `변환 시작`으로 처리할 때 `dwgsort31/pdf_lazy.py`의 `process_pdf_with_30()`을 호출할 수 있습니다.
+
+주의:
+
+- `pdf_lazy.py`는 `..\cad_converter_gui3.0.py`를 찾습니다.
+- 이 파일은 `project_minimal`에 포함되어 있지 않습니다.
+- 현재 권장 벡터 PDF 영역 지정 흐름은 `pdf_region_dialog.py`, `pdf_vector_parser.py` 안에 포함되어 있으므로 동작합니다.
+- legacy 직접 PDF 변환까지 반드시 살려야 한다면 외부 `cad_converter_gui3.0.py`를 수동 검토해야 합니다.
+
+## PDF 영역 지정 창 기능
+
+구현 파일: `dwgsort31/pdf_region_dialog.py`
+
+주요 기능:
+
+- 드래그 선택
+- 두 점 선택
+- 두 점 선택 중 첫 점 기준 미리보기 사각형
+- `Esc`: 두 점 선택의 첫 점 취소
+- 마우스 휠 줌
+- 우클릭 드래그 팬
+- `Space + 좌클릭 드래그` 팬
+- 방향키로 선택 박스 이동
+- `Shift + 방향키`: 10px 단위 이동
+- `Ctrl + 방향키`: 선택 박스 크기 조절
+- 전체 보기, 가로폭 맞춤, 100%, 200%, 400%, 800% 줌
+- 영역 검사로 추출 텍스트, 행 후보, 매칭 상태 확인
+- 선택 영역, 실제 추출 영역, 선택/제외된 행, X 매칭 선 오버레이 표시
+
+PDF 전용 설정:
+
+- `PDF_Y_TOLERANCE = 5.0`
+- `PDF_X_TOLERANCE = 10.0`
+- `PDF_ROW_CLUSTER_TOLERANCE = 1.5`
+- `PDF_REGION_PAD_RATIO = 0.15`
+
+## 변환 설정
+
+UI 위치: `변환 설정`
+
+- `저장`: `2.4`, `3.1`, `3.3`
+- `Y오차`: Excel 원본 점 추출용
+- `기울기`: 점 정리 시 기울기 변화 민감도
+- `거리`: 중요한 점 사이가 너무 멀 때 보조 점을 남기는 최대 거리
+- `고점`: 봉우리/골짜기 판정 민감도
+- `PDF`: PDF 시작/끝 페이지
+- `적용`: 현재 설정으로 점 정리 적용
+- `초기화`: 설정값은 바꾸지 않고 미리보기와 결과표만 전체 점으로 복귀
+
+설정값을 바꿔도 자동으로 필터가 적용되지 않습니다. 점 정리는 `적용`을 눌렀을 때만 반영됩니다.
+
+## 그래프와 결과표
+
+- 왼쪽 그래프 미리보기는 현재 결과표와 같은 데이터를 그립니다.
+- 처음 파일을 불러오면 전체 점이 표시됩니다.
+- `적용` 후에는 정리된 점이 표시됩니다.
+- `초기화` 후에는 전체 점이 다시 표시됩니다.
+- PDF 결과표는 디버그용 컬럼을 포함할 수 있습니다.
+- 저장되는 CSV/Excel 기본 결과는 단순한 `관저고`, `누가거리`, `결과` 형태입니다.
+
+## 복사 기능
+
+- `변환 결과 미리보기` 제목 오른쪽의 `복사`: 현재 결과의 관저고/누가거리 컬럼을 클립보드에 복사합니다.
+- 표에서 `Ctrl+C`: 선택한 셀 범위를 클립보드에 복사합니다.
+- `실행 로그`의 `로그 복사`: 로그 전체를 클립보드에 복사합니다.
+
+## 저장 기능
+
+- `엑셀로 저장`: 현재 결과를 `.xlsx`로 저장합니다.
+- `CSV로 저장`: 현재 결과를 UTF-8 BOM 포함 CSV로 저장합니다.
+- `변환 시작`: 선택 파일을 백그라운드 worker로 처리하고, 파일 위치에 `결과_<원본파일명>.xlsx`를 생성합니다.
+- 이미 저장된 결과가 있으면 같은 경로를 다시 안내합니다.
+- 파일명 충돌 시 `safe_output_path()`가 `_1`, `_2` 같은 번호를 붙입니다.
+
+## 로그와 상태 표시
+
+- PDF 추출과 매칭은 실패 원인을 찾기 위해 비교적 자세한 로그를 남깁니다.
+- 로그에는 선택 영역, 실제 추출 영역, 행 후보, X 매칭, line_id 감지 등이 표시됩니다.
+- 진행 상황 카드에는 진행률, 예상 남은 시간, 현재 파일명이 표시됩니다.
+
+## 포함된 파일
 
 ```text
-[PDF] 사용자 선택 영역: ...
-[PDF] 실제 추출 영역: ...
-[PDF] PDF 설정: y_tolerance=..., x_tolerance=..., row_cluster_tolerance=...
-[PDF] 감지된 숫자 행 클러스터: ...
-[PDF] 누가거리 라벨 인식: contents='...'
-[PDF] 관저고 라벨 인식: contents='...'
-[PDF][DEBUG] 누가거리 후보 행: ...
-[PDF][DEBUG] 관저고 후보 행: ...
-[PDF] X좌표 매칭 성공: ...
-[PDF] line_id 감지: ...
+project_minimal/
+  cad_converter_qt.py
+  DWGSort_4.0_실행.bat
+  README.md
+  README_MINIMAL.md
+  requirements.txt
+  cleanup_candidates.md
+  analyze_project_size.py
+  create_minimal_project.py
+  dwgsort31/
+    __init__.py
+    config.py
+    excel_compat.py
+    excel_compat3.3.py
+    excel_compat33.py
+    extended_save.py
+    pdf_lazy.py
+    pdf_point_filter.py
+    pdf_region_dialog.py
+    pdf_vector_parser.py
+    plotting.py
+    qt_app.py
+    qt_styles.py
+    qt_widgets.py
+    qt_workers.py
+    utils.py
 ```
 
-The UI has a log copy button so users can paste logs into an AI assistant for debugging.
+## 포함하지 않은 파일과 이유
 
-## Version History
+- `.venv/`: `requirements.txt`로 재생성합니다.
+- `.git/`: 최소 실행본에는 Git 히스토리가 필요 없습니다.
+- `__pycache__/`, `*.pyc`: 실행 중 자동 생성되는 캐시입니다.
+- `videoframe_0.ico`: 현재 코드에서 `QIcon`, `setWindowIcon`, 파일명 참조가 없습니다.
+- `run.bat`, `run_and_test.bat`, `run_auto_reload.bat`: legacy 실행 도우미이며 필수 실행 경로가 아닙니다.
+- `dwgsort31/excel_compat__1.py`, `dwgsort31/excel_compat__2.py`: 백업 모듈이며 실제 import가 확인되지 않았습니다.
+- 샘플 결과 CSV: 실행 필수 데이터가 아닙니다.
+- `UI_HANDOFF_FOR_CLAUDE.md`: 개발 인수인계 문서이며 실행 필수 파일이 아닙니다.
 
-Saved Git tags:
+## 반드시 유지해야 하는 특이 파일
 
-```bash
-git checkout v3.1
-git checkout v3.2
-git checkout v3.3
-git checkout v4.0
+- `dwgsort31/excel_compat3.3.py`: 파일명에 점이 들어 있어 일반 import는 어렵지만, `excel_compat33.py`가 `spec_from_file_location()`으로 동적 로딩합니다.
+- `dwgsort31/pdf_lazy.py`: legacy PDF 직접 변환 경로 때문에 `qt_workers.py`에서 import합니다.
+- `dwgsort31/plotting.py`: 그래프 새 창 미리보기에서 함수 내부 lazy import로 사용합니다.
+
+## 검증된 내용
+
+`project_minimal` 기준으로 확인한 항목:
+
+- `.venv` 생성과 패키지 설치 가능
+- `requirements.txt` 설치 성공
+- 모든 Python 파일 `py_compile` 성공
+- 내부 모듈 import 성공
+- `excel_compat3.3.py` 동적 로딩 성공
+- PySide6 `MainWindow` 생성 성공
+- `DWGSort_4.0_실행.bat`가 `project_minimal\.venv\Scripts\python.exe cad_converter_qt.py`를 호출하는 것 확인
+- 창 제목: `CAD PDF Converter Pro - DWG Sort 4.0`
+
+## 유지보수 가이드
+
+- UI 버튼, 카드, 미리보기, 저장 흐름 수정: `dwgsort31/qt_app.py`
+- PDF 선택 창, 줌/팬/오버레이 수정: `dwgsort31/pdf_region_dialog.py`
+- PDF 텍스트 추출, 라벨/행 선택, X 매칭 수정: `dwgsort31/pdf_vector_parser.py`
+- PDF 점 정리 수정: `dwgsort31/pdf_point_filter.py`
+- Excel 원본 추출과 2.4 저장 수정: `dwgsort31/excel_compat.py`
+- 3.3 점 정리 수정: `dwgsort31/excel_compat3.3.py`
+- 3.3 동적 로더 수정: `dwgsort31/excel_compat33.py`
+- 백그라운드 변환과 저장 worker 수정: `dwgsort31/qt_workers.py`
+- 스타일 수정: `dwgsort31/qt_styles.py`
+- 공용 위젯 수정: `dwgsort31/qt_widgets.py`
+
+Excel 호환 로직은 오래된 흐름을 보존하는 목적이 크므로, PDF 전용 변경 중에는 가능한 건드리지 않는 것이 좋습니다.
+
+## 문제 해결
+
+`ModuleNotFoundError: No module named 'PySide6'`:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install -r requirements.txt
 ```
 
-Main branch after `v4.0` includes additional PDF region selection and inspection improvements.
+PDF 미리보기가 열리지 않는 경우:
 
-Return to the current branch:
+- `PyMuPDF` 설치 여부를 확인합니다.
+- 스캔 PDF가 아닌 CAD 벡터 PDF인지 확인합니다.
 
-```bash
-git checkout main
-```
+PDF 결과가 비어 있는 경우:
 
-## Ignored Local Files
+- 선택 영역이 실제 데이터 행과 라벨을 포함하는지 확인합니다.
+- PDF 영역 지정 창의 영역 검사와 로그 복사를 사용해 추출 텍스트를 확인합니다.
+- PDF 전용 `Y/X/행 클러스터` 설정을 조정합니다.
 
-The following local/generated folders are intentionally not tracked:
+Excel 결과가 비어 있는 경우:
 
-- `.venv/`
-- `build/`
-- `dist/`
-- `trash/`
-- `3.0error/`
-- `__pycache__/`
-- generated `.exe` files
+- 파일에 `Contents`, `Position` 컬럼이 있는지 확인합니다.
+- `누가거리`, `관저고` 라벨이 추출 데이터에 존재하는지 확인합니다.
+- `Y오차` 값을 조정합니다.
 
-These can be recreated locally and should not be committed to GitHub.
+Legacy PDF 직접 변환에서 `PDF 처리 모듈을 찾을 수 없습니다.`가 나오는 경우:
+
+- `..\cad_converter_gui3.0.py`가 없는 것이 원인입니다.
+- 권장 PDF 영역 지정 흐름을 사용하거나, legacy 파일을 별도로 검토해 포함해야 합니다.
