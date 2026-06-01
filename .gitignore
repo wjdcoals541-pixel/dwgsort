@@ -1,0 +1,22 @@
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+.buildvenv/
+
+# Build outputs
+build/
+dist/
+*.spec.bak
+*.exe
+
+# Local run outputs and user data
+*.csv
+*.xls
+*.xlsx
+
+# Editor and OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

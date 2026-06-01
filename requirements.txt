@@ -1,0 +1,7 @@
+PySide6
+pandas
+matplotlib
+openpyxl
+xlrd
+PyMuPDF
+ezdxf
