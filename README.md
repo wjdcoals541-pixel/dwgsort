@@ -23,7 +23,7 @@ cd E:\ai\pythonpythonpython\dwgsort\dwgsort\project_minimal
 .\DWGSort_4.0_실행.bat
 ```
 
-`DWGSort_4.0_실행.bat`는 현재 폴더의 `.venv\Scripts\python.exe`가 있으면 그것을 사용하고, 없으면 시스템 `python`으로 `cad_converter_qt.py`를 실행합니다.
+`DWGSort_4.0_실행.bat`는 현재 폴더의 `.venv\Scripts\python.exe`를 먼저 확인합니다. 기존 `.venv`가 다른 PC/사용자 경로를 가리켜 깨져 있으면 `.venv`를 다시 만들고, `requirements.txt` 기준으로 필요한 패키지를 설치한 뒤 `cad_converter_qt.py`를 실행합니다.
 
 ## 필요한 패키지
 
@@ -277,6 +277,11 @@ python -m venv .venv
 .\.venv\Scripts\activate
 python -m pip install -r requirements.txt
 ```
+
+`did not find executable at ... python.exe`:
+
+- 기존 `.venv`가 다른 Windows 사용자 또는 삭제된 Python 경로를 가리키는 것이 원인입니다.
+- `DWGSort_4.0_실행.bat`를 다시 실행하면 깨진 `.venv`를 감지해 재생성합니다.
 
 PDF 미리보기가 열리지 않는 경우:
 
