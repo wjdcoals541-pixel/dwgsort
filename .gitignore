@@ -7,6 +7,7 @@ __pycache__/
 # Build outputs
 build/
 dist/
+tmp/
 *.spec.bak
 *.exe
 
