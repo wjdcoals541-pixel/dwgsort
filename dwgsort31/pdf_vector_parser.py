@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from .config import (
+    DISTANCE_LABELS,
     PDF_REGION_PAD_RATIO,
     PDF_ROW_CLUSTER_TOLERANCE,
     PDF_X_TOLERANCE,
@@ -198,7 +199,7 @@ def analyze_pdf_label_rows(
         elevation_labels = _find_exact_labels(page_items, "관저고", "관저고")
 
         log_func(f"[PDF][DEBUG] {page}페이지 라벨 분석 대상 텍스트 {len(page_items)}개")
-        _log_labels(log_func, page, "누가거리", distance_labels)
+        _log_labels(log_func, page, "누가거리/추가거리", distance_labels)
         _log_labels(log_func, page, "관저고", elevation_labels)
 
         number_rows = _cluster_number_rows(page_items, row_cluster_tolerance)
@@ -215,7 +216,7 @@ def analyze_pdf_label_rows(
         elevation_label = elevation_labels[0] if elevation_labels else None
 
         if distance_label is None:
-            log_func(f"[PDF][WARN] {page}페이지 누가거리 라벨을 찾지 못했습니다.")
+            log_func(f"[PDF][WARN] {page}페이지 누가거리/추가거리 라벨을 찾지 못했습니다.")
         if elevation_label is None:
             log_func(f"[PDF][WARN] {page}페이지 관저고 라벨을 찾지 못했습니다.")
 
@@ -268,7 +269,7 @@ def match_pdf_profile_rows(
         elevation_label = page_rows.get("elevation_label")
 
         if distance_label is None:
-            log_func(f"[PDF][ERROR] {page}페이지 누가거리 라벨 미검출")
+            log_func(f"[PDF][ERROR] {page}페이지 누가거리/추가거리 라벨 미검출")
         if elevation_label is None:
             log_func(f"[PDF][ERROR] {page}페이지 관저고 라벨 미검출")
         if not distance_numbers:
@@ -546,38 +547,44 @@ def _find_exact_labels(items, needle, name):
 
 
 def _find_distance_labels(items, y_tolerance, x_tolerance):
-    labels = _find_exact_labels(items, "누가거리", "누가거리")
+    labels = [
+        label
+        for name in DISTANCE_LABELS
+        for label in _find_exact_labels(items, name, name)
+    ]
     labels.extend(_find_split_distance_labels(items, y_tolerance, x_tolerance))
     labels.sort(key=lambda label: (label.y, label.x, label.source))
     return labels
 
 
 def _find_split_distance_labels(items, y_tolerance, x_tolerance):
-    nu_items = [item for item in items if _normalize_text(item.contents) == "누가"]
     distance_items = [item for item in items if _normalize_text(item.contents) == "거리"]
     labels = []
     max_x_gap = max(x_tolerance * 6, 30.0)
 
-    for nu_item in nu_items:
-        candidates = [
-            distance_item
-            for distance_item in distance_items
-            if abs(distance_item.y - nu_item.y) <= y_tolerance
-            and 0 <= distance_item.x - nu_item.x <= max_x_gap
-        ]
-        if not candidates:
-            continue
-        nearest = min(candidates, key=lambda item: abs(item.x - nu_item.x))
-        labels.append(
-            PdfLabel(
-                page=nu_item.page,
-                name="누가거리",
-                x=round((nu_item.x + nearest.x) / 2, 2),
-                y=round((nu_item.y + nearest.y) / 2, 2),
-                contents=f"{nu_item.contents}+{nearest.contents}",
-                source="split",
+    for name in DISTANCE_LABELS:
+        prefix = name.removesuffix("거리")
+        prefix_items = [item for item in items if _normalize_text(item.contents) == prefix]
+        for prefix_item in prefix_items:
+            candidates = [
+                distance_item
+                for distance_item in distance_items
+                if abs(distance_item.y - prefix_item.y) <= y_tolerance
+                and 0 <= distance_item.x - prefix_item.x <= max_x_gap
+            ]
+            if not candidates:
+                continue
+            nearest = min(candidates, key=lambda item: abs(item.x - prefix_item.x))
+            labels.append(
+                PdfLabel(
+                    page=prefix_item.page,
+                    name=name,
+                    x=round((prefix_item.x + nearest.x) / 2, 2),
+                    y=round((prefix_item.y + nearest.y) / 2, 2),
+                    contents=f"{prefix_item.contents}+{nearest.contents}",
+                    source="split",
+                )
             )
-        )
     return labels
 
 

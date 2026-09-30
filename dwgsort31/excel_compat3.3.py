@@ -2,6 +2,7 @@ import os
 
 import pandas as pd
 
+from .config import DISTANCE_LABELS
 from .utils import safe_output_path
 
 
@@ -68,11 +69,11 @@ def process_excel_data(file_path, log_func, tolerance):
     )
     df = master_df.dropna(subset=["X", "Y"]).copy()
 
-    nu_rows = df[df["Contents_clean"] == "누가거리"]
+    nu_rows = df[df["Contents_clean"].isin(DISTANCE_LABELS)]
     gwan_rows = df[df["Contents_clean"] == "관저고"]
 
     if nu_rows.empty or gwan_rows.empty:
-        log_func(" ⚠️ '누가거리' 또는 '관저고' 텍스트를 찾을 수 없습니다.")
+        log_func(" ⚠️ '누가거리/추가거리' 또는 '관저고' 텍스트를 찾을 수 없습니다.")
         return None
 
     nu_y_clusters = get_y_clusters(nu_rows["Y"], tolerance)
@@ -81,7 +82,7 @@ def process_excel_data(file_path, log_func, tolerance):
     log_func(f"  -> 도면 분석 완료: 총 {tier_count}개의 단(줄)을 발견했습니다.")
 
     numeric_df = df[
-        (df["Contents_clean"] != "누가거리")
+        (~df["Contents_clean"].isin(DISTANCE_LABELS))
         & (df["Contents_clean"] != "관저고")
         & (df["Contents_clean"].apply(is_numeric))
     ].copy()
