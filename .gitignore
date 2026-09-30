@@ -37,3 +37,7 @@ Thumbs.db
 # Excel temp files
 ~$*.xls
 ~$*.xlsx
+
+# Local engineering templates and generated workbooks (not published)
+templates/
+양식변환결과/

@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parent
 DEST = ROOT / "project_minimal"
 
 REQUIRED_FILES = [
+    "profile_template_app.py",
+    "관로종단도_양식만들기.bat",
+    "dwgsort31/profile_template.py",
     "cad_converter_qt.py",
     "DWGSort_4.0_실행.bat",
     "README.md",
