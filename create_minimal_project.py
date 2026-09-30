@@ -13,6 +13,7 @@ REQUIRED_FILES = [
     "README.md",
     "dwgsort31/__init__.py",
     "dwgsort31/config.py",
+    "dwgsort31/excel_input.py",
     "dwgsort31/excel_compat.py",
     "dwgsort31/excel_compat3.3.py",
     "dwgsort31/excel_compat33.py",

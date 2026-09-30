@@ -79,7 +79,7 @@ python cad_converter_qt.py
 
 1. 사용자가 `.xls` 또는 `.xlsx` 파일을 선택합니다.
 2. `pandas.read_excel(..., sheet_name=None)`로 모든 시트를 읽어 합칩니다.
-3. `Contents`, `Position` 컬럼을 찾습니다.
+3. `Contents`/`컨텐츠`/`콘텐츠`/`내용`, `Position`/`위치` 컬럼을 찾습니다. `Position: X`, `Position: Y`가 별도 열이어도 읽습니다.
 4. `Position`에서 X, Y 좌표를 파싱합니다.
 5. `누가거리` 또는 `추가거리`, `관저고` 라벨 행을 찾습니다.
 6. 변환 설정의 `Y오차`로 같은 행에 있는 숫자 후보를 찾습니다.
@@ -89,6 +89,12 @@ python cad_converter_qt.py
 10. `초기화` 버튼을 누르면 설정값은 그대로 두고 미리보기/결과표만 전체 점으로 되돌립니다.
 
 Excel에서 `Y오차`는 원본 점 추출에 사용됩니다.
+
+문자 라벨이 없는 DATAEXTRACTION 파일은 `Layer`/`도면층`을 확인합니다. `누가거리` 또는 `추가거리` 도면층의 숫자와 `관저고박스`(없으면 `관저고`, `관저고원` 순서)의 숫자를 X 좌표로 매칭합니다. 지원하는 도면층도 없으면 추출하지 않습니다.
+
+도면층 처리에서는 시트와 Y 위치로 행을 나누고, X 순서에서 누적 거리가 다시 시작되면 별도 종단으로 구분합니다. `line_id`는 이 구분을 표시하는 번호입니다. 종단별 점 정리와 그래프 표시를 적용하며, 표·CSV·Excel 저장에도 `line_id`를 포함해 다른 종단의 같은 거리값이 섞이지 않도록 합니다.
+
+검증 명령: `python -m unittest discover -s tests -v`, `python -m compileall -q cad_converter_qt.py dwgsort31`.
 
 ## PDF 처리 방식
 
@@ -207,6 +213,7 @@ project_minimal/
   dwgsort31/
     __init__.py
     config.py
+    excel_input.py
     excel_compat.py
     excel_compat3.3.py
     excel_compat33.py
@@ -291,8 +298,9 @@ PDF 결과가 비어 있는 경우:
 
 Excel 결과가 비어 있는 경우:
 
-- 파일에 `Contents`, `Position` 컬럼이 있는지 확인합니다.
+- 파일에 `Contents`/`컨텐츠` 등 문자 내용과 `Position`/`위치` 또는 `Position: X·Y` 좌표 열이 있는지 확인합니다.
 - `누가거리` 또는 `추가거리`, `관저고` 라벨이 추출 데이터에 존재하는지 확인합니다.
+- 문자 라벨이 없다면 `도면층`에 `누가거리`/`추가거리`와 `관저고박스` 등의 지원 도면층이 있는지 확인합니다.
 - `Y오차` 값을 조정합니다.
 
 Legacy PDF 직접 변환에서 `PDF 처리 모듈을 찾을 수 없습니다.`가 나오는 경우:

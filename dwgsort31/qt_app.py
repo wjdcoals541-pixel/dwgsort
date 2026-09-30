@@ -57,7 +57,7 @@ from .pdf_point_filter import filter_pdf_graph_points
 from .qt_styles import apply_fluent_theme
 from .qt_widgets import Card, DropZone, MetricCard, make_button
 from .qt_workers import AnalysisWorker
-from .utils import safe_output_path
+from .utils import result_columns, safe_output_path
 
 
 KOREAN_FONT = None
@@ -818,13 +818,7 @@ class MainWindow(QMainWindow):
             self.last_saved_path = None
             self.draw_inline_preview(self.last_filtered_df)
             self._populate_table(self.last_filtered_df)
-            self._update_summary(
-                {
-                    "line_count": 1,
-                    "page_count": 0,
-                    "quantity_count": int(len(self.last_filtered_df)),
-                }
-            )
+            self._update_summary(self._build_preview_summary(self.last_filtered_df))
             self.set_preview_message(f"선택 파일 미리보기: {os.path.basename(file_path)}")
             self._set_working(False)
             self.apply_responsive_layout()
@@ -1162,7 +1156,7 @@ class MainWindow(QMainWindow):
             columns = pdf_columns
         else:
             display_df = add_result_column(df).head(300)
-            columns = ["관저고", "누가거리", "결과"]
+            columns = result_columns(display_df)
         self.table.setRowCount(len(display_df))
         self.table.setColumnCount(len(columns))
         self.table.setHorizontalHeaderLabels(columns)
@@ -1255,7 +1249,7 @@ class MainWindow(QMainWindow):
 
     def _default_result_save_df(self, df):
         result_df = add_result_column(df)
-        return result_df[["관저고", "누가거리", "결과"]].copy()
+        return result_df[result_columns(result_df)].copy()
 
     def reset(self):
         self.selected_files = []

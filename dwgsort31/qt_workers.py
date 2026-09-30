@@ -166,7 +166,7 @@ def build_summary(raw_df, filtered_df):
         total_pages = int(pages.nunique()) if not pages.empty else 0
 
     return {
-        "line_count": unique_count("라인명") or 1,
+        "line_count": unique_count("line_id") or unique_count("라인명") or 1,
         "page_count": total_pages,
         "diameter_count": unique_count("관경") or unique_count("환경"),
         "quantity_count": int(len(filtered_df)),

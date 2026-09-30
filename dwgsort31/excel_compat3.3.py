@@ -3,7 +3,8 @@ import os
 import pandas as pd
 
 from .config import DISTANCE_LABELS
-from .utils import safe_output_path
+from .excel_input import extract_layer_profiles, read_excel_extraction
+from .utils import filter_profile_groups, result_columns, safe_output_path
 
 
 def extract_coordinates(pos_str):
@@ -53,8 +54,7 @@ def process_excel_data(file_path, log_func, tolerance):
     """2.4-compatible Excel coordinate extraction."""
     log_func(f"\n⏳ 읽는 중: {os.path.basename(file_path)}")
     try:
-        xls = pd.read_excel(file_path, sheet_name=None)
-        master_df = pd.concat(xls.values(), ignore_index=True)
+        master_df = read_excel_extraction(file_path, log_func)
     except Exception as e:
         log_func(f" ❌ 파일 읽기 오류: {e}")
         return None
@@ -73,6 +73,9 @@ def process_excel_data(file_path, log_func, tolerance):
     gwan_rows = df[df["Contents_clean"] == "관저고"]
 
     if nu_rows.empty or gwan_rows.empty:
+        layer_result = extract_layer_profiles(df, log_func, tolerance)
+        if layer_result is not None:
+            return layer_result
         log_func(" ⚠️ '누가거리/추가거리' 또는 '관저고' 텍스트를 찾을 수 없습니다.")
         return None
 
@@ -145,6 +148,11 @@ def filter_graph_points_24(
     3. local peaks/valleys using only peak_prominence
     4. low-priority spacing points when important points are farther than max_dist
     """
+    if "line_id" in df and not df.empty:
+        return filter_profile_groups(
+            df, filter_graph_points_24, log_func, slope_threshold, max_dist,
+            peak_prominence=peak_prominence, peak_window=peak_window,
+        )
     df = df.copy()
     df["누가거리_num"] = pd.to_numeric(
         df["누가거리"].astype(str).str.replace(",", "", regex=False),
@@ -303,7 +311,7 @@ def save_compat_24_excel(filtered_df, output_path):
     """Save exactly in the 2.4 output shape."""
     result_df = add_result_column(filtered_df)
     safe_path = safe_output_path(output_path)
-    result_df[["관저고", "누가거리", "결과"]].to_excel(
+    result_df[result_columns(result_df)].to_excel(
         safe_path, index=False, engine="openpyxl"
     )
     return safe_path
