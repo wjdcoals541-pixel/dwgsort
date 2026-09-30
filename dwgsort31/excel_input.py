@@ -7,6 +7,18 @@ import pandas as pd
 from .config import DISTANCE_LABELS
 
 
+def profile_row_tolerance(df, reference_y, requested_tolerance):
+    """Do not let the search band cross into a neighbouring labelled row."""
+    row_names = {*DISTANCE_LABELS, "관저고", "지반고", "구간거리", "단거리", "토피", "측점", "구배"}
+    text = df["Contents_clean"].str.replace(r"\s+", "", regex=True)
+    label_y = df.loc[text.isin(row_names), "Y"]
+    gaps = (label_y - reference_y).abs()
+    gaps = gaps[gaps > 1e-6]
+    if gaps.empty:
+        return requested_tolerance
+    return min(requested_tolerance, float(gaps.min()) / 2)
+
+
 def read_excel_extraction(file_path, log_func):
     frames = []
     aliases = {

@@ -86,6 +86,19 @@ class ExcelInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "컨텐츠"):
                 read_excel_extraction("sample.xls", lambda message: None)
 
+    def test_dense_profile_rows_do_not_mix_interval_ground_and_cover(self):
+        rows = [[name, f"-1,{y}"] for name, y in [
+            ("구간거리", 0), ("누가거리", 1.5), ("지반고", 3),
+            ("관저고", 4.5), ("토  피", 6),
+        ]]
+        for x, interval, distance, elevation in [(0, 0, 0, 23.51), (3, 3, 3, 23.51), (12, 9, 12, 23.49)]:
+            rows.extend([[str(value), f"{x},{y + 0.3}"] for value, y in [
+                (interval, 0), (distance, 1.5), (24.9, 3), (elevation, 4.5), (1.2, 6),
+            ]])
+        result = self.read({"Sheet1": pd.DataFrame(rows, columns=["Contents", "Position"])})
+        self.assertEqual(result["누가거리"].map(float).tolist(), [0, 3, 12])
+        self.assertEqual(result["관저고"].map(float).tolist(), [23.51, 23.51, 23.49])
+
 
 if __name__ == "__main__":
     unittest.main()

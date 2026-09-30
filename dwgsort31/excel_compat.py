@@ -3,7 +3,7 @@ import os
 import pandas as pd
 
 from .config import DISTANCE_LABELS
-from .excel_input import extract_layer_profiles, read_excel_extraction
+from .excel_input import extract_layer_profiles, profile_row_tolerance, read_excel_extraction
 from .utils import filter_profile_groups, result_columns, safe_output_path
 
 
@@ -96,8 +96,11 @@ def process_excel_data(file_path, log_func, tolerance):
         ref_y_nu = nu_y_clusters[i]
         ref_y_gwan = gwan_y_clusters[i]
 
-        nu_cands = numeric_df[abs(numeric_df["Y"] - ref_y_nu) <= tolerance]
-        gwan_cands = numeric_df[abs(numeric_df["Y"] - ref_y_gwan) <= tolerance]
+        distance_tolerance = profile_row_tolerance(df, ref_y_nu, tolerance)
+        elevation_tolerance = profile_row_tolerance(df, ref_y_gwan, tolerance)
+        log_func(f"[Excel] 행별 Y 허용오차: 거리 {distance_tolerance:g}, 관저고 {elevation_tolerance:g}")
+        nu_cands = numeric_df[abs(numeric_df["Y"] - ref_y_nu) <= distance_tolerance]
+        gwan_cands = numeric_df[abs(numeric_df["Y"] - ref_y_gwan) <= elevation_tolerance]
 
         for _, nu_row in nu_cands.iterrows():
             if gwan_cands.empty:
