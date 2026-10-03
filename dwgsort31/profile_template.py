@@ -13,6 +13,7 @@ from zipfile import ZipFile
 import pandas as pd
 
 from .excel_compat import process_excel_data
+from .air_valves import merge_valves
 
 
 def read_bytes(path):
@@ -140,7 +141,7 @@ def row_copy(source, index):
     return row
 
 
-def fill_sheet(data, points, title, secondary=False):
+def fill_sheet(data, points, title, secondary=False, valves=None):
     doc = DOM.parseString(data)
     sheet_data = elements(doc, 'sheetData')[0]
     rows = {int(r.getAttribute('r')): r for r in elements(sheet_data, 'row')}
@@ -167,6 +168,9 @@ def fill_sheet(data, points, title, secondary=False):
         else:
             write_cell(doc, row, 'D', distance)
             write_cell(doc, row, 'E', delta, '0' if i == 0 else f'D{number}-D{number-1}')
+        if not secondary and valves and i in valves:
+            write_cell(doc, row, 'H', valves[i]['av'])
+            write_cell(doc, row, 'I', valves[i]['station'])
         new_rows.append(row)
     if not secondary:
         total = row_copy(rows[27], end + 1)
@@ -230,7 +234,7 @@ def update_chart(data, points, title):
     return doc.toxml(encoding='utf-8')
 
 
-def create_report(template, destination, points, title):
+def create_report(template, destination, points, title, valves=None):
     if not points or len(points) > 100000:
         raise ValueError('데이터는 1~100,000개여야 합니다.')
     destination = Path(destination)
@@ -240,7 +244,7 @@ def create_report(template, destination, points, title):
     names = [s.getAttribute('name') for s in elements(book, 'sheet')]
     if names != ['관로종단도', '수공양식 ', 'Sheet2', 'Sheet3']:
         raise ValueError('제공된 광양시 관로종단도와 동일한 시트 구조의 양식을 선택해주세요.')
-    parts['xl/worksheets/sheet1.xml'] = fill_sheet(parts['xl/worksheets/sheet1.xml'], points, title)
+    parts['xl/worksheets/sheet1.xml'] = fill_sheet(parts['xl/worksheets/sheet1.xml'], points, title, valves=valves)
     parts['xl/worksheets/sheet2.xml'] = fill_sheet(parts['xl/worksheets/sheet2.xml'], points, title, True)
     parts['xl/charts/chart2.xml'] = update_chart(parts['xl/charts/chart2.xml'], points, title)
     for name in elements(book, 'definedName'):
@@ -274,11 +278,14 @@ def create_report(template, destination, points, title):
     return destination
 
 
-def convert_file(source, template, output_dir, log=lambda _: None):
+def convert_file(source, template, output_dir, log=lambda _: None, edits=None):
     profiles = read_profiles(source, log)
     created = []
     base = Path(source).stem.removeprefix('결과_')
-    for i, (_, points) in enumerate(profiles, 1):
+    for i, (profile_name, points) in enumerate(profiles, 1):
+        rows = merge_valves(points, (edits or {}).get(profile_name, []))
+        points = [(r["distance"], r["elevation"]) for r in rows]
+        valves = {j: r for j, r in enumerate(rows) if r["av"]}
         title = base + (f' 종단{i}' if len(profiles) > 1 else '')
         stem = re.sub(r'[<>:"/\\|?*]', '_', title) + '_관로종단도'
         destination = Path(output_dir) / f'{stem}.xlsx'
@@ -286,7 +293,7 @@ def convert_file(source, template, output_dir, log=lambda _: None):
         while destination.exists():
             destination = Path(output_dir) / f'{stem}_{serial}.xlsx'
             serial += 1
-        create_report(template, destination, points, title)
+        create_report(template, destination, points, title, valves=valves)
         log(f'완료: {destination.name} ({len(points)}개 점)')
         created.append(destination)
     return created
