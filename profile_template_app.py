@@ -20,11 +20,6 @@ class Worker(QThread):
 
     def __init__(self, sources, template, output):
         super().__init__()
-        font_path = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts' / 'malgun.ttf'
-        if font_path.is_file():
-            QFontDatabase.addApplicationFont(str(font_path))
-        QApplication.instance().setFont(QFont('Malgun Gothic', 10))
-        self.setFont(QFont('Malgun Gothic', 10))
         self.sources, self.template, self.output = sources, template, output
 
     def run(self):
@@ -42,6 +37,11 @@ class Worker(QThread):
 class TemplateWindow(QWidget):
     def __init__(self):
         super().__init__()
+        font_path = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts' / 'malgun.ttf'
+        if font_path.is_file():
+            QFontDatabase.addApplicationFont(str(font_path))
+        QApplication.instance().setFont(QFont('Malgun Gothic', 10))
+        self.setFont(QFont('Malgun Gothic', 10))
         self.worker = None
         self.settings = QSettings('DWGSort', 'ProfileTemplate')
         self.setWindowTitle('관로종단도 양식 만들기')
